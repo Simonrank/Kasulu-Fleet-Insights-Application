@@ -11,6 +11,8 @@ const PAGE_SIZE = 10;
 
 type Props = {
   rows: UnitLatestRow[];
+  isLoading?: boolean;
+  error?: string | null;
 };
 
 function mapsUrl(lat: number | null, lon: number | null): string | null {
@@ -18,7 +20,11 @@ function mapsUrl(lat: number | null, lon: number | null): string | null {
   return `https://www.google.com/maps?q=${lat},${lon}`;
 }
 
-export function CurrentAssetLocationTable({ rows }: Props) {
+export function CurrentAssetLocationTable({
+  rows,
+  isLoading = false,
+  error = null,
+}: Props) {
   const [page, setPage] = useState(0);
 
   const sortedRows = useMemo(
@@ -88,6 +94,20 @@ export function CurrentAssetLocationTable({ rows }: Props) {
         </div>
       </div>
 
+      {isLoading ? (
+        <div className="py-16 text-center">
+          <p className="text-sm font-medium text-dash-foreground">
+            Loading current locations…
+          </p>
+          <p className="mt-2 text-xs text-dash-muted">
+            Live unit data — can take a few minutes for the selected range.
+          </p>
+        </div>
+      ) : error ? (
+        <div className="py-12 text-center">
+          <p className="text-sm font-medium text-red-700">{error}</p>
+        </div>
+      ) : (
       <div className="overflow-x-auto rounded-xl border border-slate-200">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
@@ -176,6 +196,7 @@ export function CurrentAssetLocationTable({ rows }: Props) {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

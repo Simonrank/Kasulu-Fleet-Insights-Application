@@ -61,6 +61,17 @@ export const wialonConfig = {
   reportMaxDays: Number(process.env.WIALON_REPORT_MAX_DAYS ?? "7"),
 };
 
+export function isTelematicsConfigured(): boolean {
+  const token = wialonConfig.token;
+  const hasToken = !!token && token !== "your_wialon_token_here";
+  return (
+    hasToken &&
+    !!wialonConfig.reportResourceId &&
+    !!wialonConfig.reportTemplateId &&
+    !!wialonConfig.reportGroupId
+  );
+}
+
 export function isWialonConfigured(): boolean {
   const token = wialonConfig.token;
   const hasToken = !!token && token !== "your_wialon_token_here";
@@ -71,18 +82,11 @@ export function isWialonConfigured(): boolean {
 }
 
 export function isWialonReportConfigured(): boolean {
-  return (
-    isWialonConfigured() &&
-    !!wialonConfig.reportResourceId &&
-    !!wialonConfig.reportTemplateId &&
-    !!wialonConfig.reportGroupId
-  );
+  return isTelematicsConfigured();
 }
 
 export function isGoogleSheetsConfigured(): boolean {
   return (
-    (appConfig.dataSource === "google_sheets" ||
-      appConfig.dataSource === "both") &&
     !!process.env.GOOGLE_SHEETS_SPREADSHEET_ID?.trim() &&
     !!process.env.GOOGLE_SHEETS_FLEET_RANGE?.trim()
   );

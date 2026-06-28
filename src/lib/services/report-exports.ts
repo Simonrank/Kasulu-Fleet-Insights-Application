@@ -1,19 +1,12 @@
 import { format } from "date-fns";
 import { rowsToCsv } from "@/lib/export/csv";
-import { getFuelThefts, getDriverIncidents } from "@/lib/services/analytics";
+import { getFuelThefts } from "@/lib/services/analytics";
+import { getFleetViolations } from "@/lib/services/violations";
 import { getFleetSummary } from "@/lib/services/fleet";
 import { formatDuration } from "@/lib/fleet/theft-filters";
+import { incidentTypeLabel } from "@/lib/fleet/violations-model";
 import { appConfig } from "@/lib/config/env";
 import { formatNumber } from "@/lib/utils";
-
-const INCIDENT_LABELS: Record<string, string> = {
-  speed_violation: "Speed violation",
-  harsh_braking: "Harsh braking",
-  harsh_acceleration: "Harsh acceleration",
-  geo_fence_breach: "Geofence breach",
-  unauthorized_movement: "Unauthorized movement",
-  idle_exceedance: "Excessive idle time",
-};
 
 function periodHeader(
   reportName: string,
@@ -133,10 +126,11 @@ async function buildViolationsReportRows(
   from: Date,
   to: Date
 ): Promise<ReportRows> {
-  const [fuelData, incidents] = await Promise.all([
+  const [fuelData, violationsData] = await Promise.all([
     getFuelThefts(from, to, "all"),
-    getDriverIncidents(from, to),
+    getFleetViolations(from, to),
   ]);
+  const incidents = violationsData.incidents;
 
   const rows: ReportRows = [
     ...periodHeader("Violations Report", from, to),
@@ -182,7 +176,7 @@ async function buildViolationsReportRows(
       format(new Date(row.occurredAt), "dd MMM yyyy HH:mm"),
       row.unitName,
       row.driverName,
-      INCIDENT_LABELS[row.incidentType] ?? row.incidentType,
+      incidentTypeLabel(row.incidentType),
       row.severity,
       row.value,
       row.threshold,
@@ -207,7 +201,7 @@ async function buildVehicleLocationsRows(): Promise<ReportRows> {
     ["Current Vehicle Locations"],
     [`${appConfig.name} — ${appConfig.orgLabel}`],
     ["Generated", format(new Date(), "dd MMM yyyy HH:mm")],
-    ["Note", "Coordinates from last Wialon telemetry message"],
+    ["Note", "Coordinates from last live telemetry message"],
     [],
     [
       "Registration",

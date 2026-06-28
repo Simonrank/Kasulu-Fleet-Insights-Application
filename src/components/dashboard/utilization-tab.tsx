@@ -1,16 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useUtilization } from "@/hooks/use-fleet-data";
 import { TabWorkspace } from "@/components/dashboard/tab-workspace";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn, formatNumber } from "@/lib/utils";
-import { TrendingUp } from "lucide-react";
+import { ChevronLeft, ChevronRight, Gauge, MapPin, Clock, Timer } from "lucide-react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -22,69 +22,117 @@ type Props = {
   to: string;
 };
 
-type PerformanceFilter = "all" | "on_target" | "below_target";
+type ViewFilter = "all" | "top" | "underutilized";
+
+const PAGE_SIZE = 10;
+
+const CHART = {
+  distance: "#38bdf8",
+  engine: "#a78bfa",
+  bucket: "#f472b6",
+  grid: "#e2e8f0",
+  axis: "#64748b",
+};
 
 export function UtilizationTab({ from, to }: Props) {
   const [search, setSearch] = useState("");
-  const [performance, setPerformance] = useState<PerformanceFilter>("all");
-  const { data, isLoading } = useUtilization(from, to);
+  const [view, setView] = useState<ViewFilter>("all");
+  const [page, setPage] = useState(0);
+  const { data, isLoading, isFetching, isPlaceholderData } = useUtilization(from, to);
+
+  useEffect(() => {
+    setPage(0);
+  }, [search, view, from, to]);
+
+  const showSkeleton = isLoading && !data;
 
   const filteredUnits = useMemo(() => {
     if (!data) return [];
     const query = search.trim().toLowerCase();
 
-    return data.byUnit.filter((u) => {
-      const onTarget = u.utilizationPercent >= data.fleet.targetPercent;
-      if (performance === "on_target" && !onTarget) return false;
-      if (performance === "below_target" && onTarget) return false;
+    let units = [...data.byUnit];
+    if (view === "underutilized") {
+      units.sort((a, b) => a.distanceKm - b.distanceKm);
+    }
 
-      if (!query) return true;
-      return [u.unitName, u.driverName]
+    if (!query) return units;
+    return units.filter((u) =>
+      [u.unitName, u.driverName, u.category]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
-        .includes(query);
-    });
-  }, [data, search, performance]);
+        .includes(query)
+    );
+  }, [data, search, view]);
 
-  if (isLoading || !data) {
-    return <div className="h-64 animate-pulse rounded-xl bg-muted" />;
+  const pageCount = Math.max(1, Math.ceil(filteredUnits.length / PAGE_SIZE));
+  const pageRows = useMemo(
+    () => filteredUnits.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
+    [filteredUnits, page]
+  );
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filteredUnits.length / PAGE_SIZE) - 1);
+    if (page > maxPage) setPage(maxPage);
+  }, [filteredUnits.length, page]);
+
+  const topChartData = useMemo(() => {
+    if (!data) return [];
+    return [...data.byUnit]
+      .sort((a, b) => b.distanceKm - a.distanceKm)
+      .slice(0, 12)
+      .map((u) => ({
+        name:
+          u.unitName.length > 14
+            ? u.unitName.slice(0, 14) + "…"
+            : u.unitName,
+        fullName: u.unitName,
+        distanceKm: Math.round(u.distanceKm * 10) / 10,
+        engineHours: Math.round(u.engineHours * 10) / 10,
+      }));
+  }, [data]);
+
+  const dualAxisChartData = useMemo(() => {
+    if (!data) return [];
+    return topChartData.map((row) => ({
+      name: row.name,
+      fullName: row.fullName,
+      "Distance (km)": row.distanceKm,
+      "Engine hrs": row.engineHours,
+    }));
+  }, [topChartData, data]);
+
+  if (showSkeleton) {
+    return <UtilizationSkeleton />;
+  }
+
+  if (!data) {
+    return <UtilizationSkeleton />;
   }
 
   const { fleet } = data;
-  const meetsTarget = fleet.utilizationPercent >= fleet.targetPercent;
-  const deviation =
-    ((fleet.utilizationPercent - fleet.targetPercent) / fleet.targetPercent) *
-    100;
-
-  const chartData = filteredUnits.map((u) => ({
-    name: u.unitName.split("—")[0]?.trim() ?? u.unitName,
-    utilization: Math.round(u.utilizationPercent * 10) / 10,
-    target: fleet.targetPercent,
-  }));
-
-  const hasActiveFilters = search.length > 0 || performance !== "all";
+  const hasActiveFilters = search.length > 0 || view !== "all";
 
   return (
-    <div className="space-y-6">
+    <div className={cn("space-y-6", isFetching && !isPlaceholderData && "opacity-90")}>
       <TabWorkspace
         title="Kasulu utilization workspace"
         from={from}
         to={to}
         search={search}
         onSearchChange={setSearch}
-        searchPlaceholder="Unit or driver"
+        searchPlaceholder="Unit, category, or driver"
         filters={[
           {
-            id: "performance",
-            label: "Performance",
-            value: performance,
-            onChange: (v) => setPerformance(v as PerformanceFilter),
+            id: "view",
+            label: "View",
+            value: view,
+            onChange: (v) => setView(v as ViewFilter),
             placeholder: "All units",
             options: [
               { value: "all", label: "All units" },
-              { value: "on_target", label: "On target" },
-              { value: "below_target", label: "Below target" },
+              { value: "top", label: "Top utilized" },
+              { value: "underutilized", label: "Underutilized" },
             ],
           },
         ]}
@@ -95,155 +143,218 @@ export function UtilizationTab({ from, to }: Props) {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="sm:col-span-2">
-          <CardHeader className="flex-row items-start justify-between space-y-0">
-            <div>
-              <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Fleet Utilization
-              </CardTitle>
-              <p className="mt-3 text-4xl font-bold tracking-tight">
-                {formatNumber(fleet.utilizationPercent, 1)}%
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Productive vs engine hours
-              </p>
-            </div>
-            <div
-              className={cn(
-                "rounded-lg p-2",
-                meetsTarget
-                  ? "bg-success/10 text-success"
-                  : "bg-warning/15 text-amber-700"
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricTile
+          title="Total distance"
+          value={`${formatNumber(fleet.totalDistanceKm, 1)} km`}
+          detail="Fleet mileage in period"
+          icon={<MapPin className="h-4 w-4 text-sky-600" />}
+          iconBg="bg-sky-50"
+          accent="bg-sky-500"
+        />
+        <MetricTile
+          title="Total engine hours"
+          value={`${formatNumber(fleet.totalEngineHours, 1)} hrs`}
+          detail="Runtime across fleet"
+          icon={<Clock className="h-4 w-4 text-violet-600" />}
+          iconBg="bg-violet-50"
+          accent="bg-violet-500"
+        />
+        <MetricTile
+          title="Avg km / engine hr"
+          value={formatNumber(fleet.avgKmPerEngineHour, 1)}
+          detail="Distance correlated with runtime"
+          icon={<Gauge className="h-4 w-4 text-emerald-600" />}
+          iconBg="bg-emerald-50"
+          accent="bg-emerald-500"
+        />
+        <MetricTile
+          title="Idle hours"
+          value={`${formatNumber(fleet.totalIdleHours, 1)} hrs`}
+          detail={`Productive: ${formatNumber(fleet.totalProductiveHours, 1)} hrs`}
+          icon={<Timer className="h-4 w-4 text-amber-600" />}
+          iconBg="bg-amber-50"
+          accent="bg-amber-500"
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Top utilized vehicles</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Distance (km) and engine hours by unit
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="h-72">
+              {dualAxisChartData.length === 0 ? (
+                <p className="py-16 text-center text-sm text-muted-foreground">
+                  No utilization data in this period
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={dualAxisChartData}
+                    margin={{ top: 8, right: 8, left: 0, bottom: 48 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fontSize: 10, fill: CHART.axis }}
+                      angle={-35}
+                      textAnchor="end"
+                      height={56}
+                      interval={0}
+                    />
+                    <YAxis
+                      yAxisId="km"
+                      tick={{ fontSize: 11, fill: CHART.axis }}
+                      width={48}
+                    />
+                    <YAxis
+                      yAxisId="hrs"
+                      orientation="right"
+                      tick={{ fontSize: 11, fill: CHART.axis }}
+                      width={40}
+                    />
+                    <Tooltip
+                      labelFormatter={(_, payload) =>
+                        (payload?.[0]?.payload as { fullName?: string })
+                          ?.fullName ?? ""
+                      }
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Bar
+                      yAxisId="km"
+                      dataKey="Distance (km)"
+                      fill={CHART.distance}
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={28}
+                    />
+                    <Bar
+                      yAxisId="hrs"
+                      dataKey="Engine hrs"
+                      fill={CHART.engine}
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={28}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
               )}
-            >
-              <TrendingUp className="h-5 w-5" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center gap-3">
-              <Badge variant={meetsTarget ? "success" : "warning"}>
-                Target: {formatNumber(fleet.targetPercent, 0)}%
-              </Badge>
-              <Badge variant="outline">
-                {deviation >= 0 ? "+" : ""}
-                {formatNumber(deviation, 1)}% vs target
-              </Badge>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Engine Hours
-            </CardTitle>
+            <CardTitle>Utilization range distribution</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Vehicles grouped by distance travelled
+            </p>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">
-              {formatNumber(fleet.engineHours, 1)} hrs
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">Total runtime</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Productive Hours
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold text-success">
-              {formatNumber(fleet.productiveHours, 1)} hrs
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Idle: {formatNumber(fleet.idleHours, 1)} hrs
-            </p>
+            <div className="h-72">
+              {data.distanceBuckets.every((b) => b.count === 0) ? (
+                <p className="py-16 text-center text-sm text-muted-foreground">
+                  No vehicles in this period
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={data.distanceBuckets}
+                    margin={{ top: 8, right: 8, left: 0, bottom: 48 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: CHART.axis }}
+                      angle={-25}
+                      textAnchor="end"
+                      height={52}
+                    />
+                    <YAxis
+                      allowDecimals={false}
+                      tick={{ fontSize: 11, fill: CHART.axis }}
+                    />
+                    <Tooltip formatter={(value) => [value, "Vehicles"]} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Bar
+                      dataKey="count"
+                      name="Vehicles"
+                      fill={CHART.bucket}
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={40}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Utilization by Unit</CardTitle>
+          <CardTitle>
+            {view === "underutilized"
+              ? "Underutilized vehicles"
+              : view === "top"
+                ? "Top utilized vehicles"
+                : "Per-unit breakdown"}
+            {" "}({filteredUnits.length})
+          </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Dashed line = {formatNumber(fleet.targetPercent, 0)}% target
+            Distance and engine hours · {PAGE_SIZE} per page
           </p>
         </CardHeader>
-        <CardContent>
-          <div className="h-72">
-            {chartData.length === 0 ? (
-              <p className="py-16 text-center text-sm text-muted-foreground">
-                No units match your filters
-              </p>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={chartData}
-                  margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} />
-                  <Tooltip
-                    formatter={(value) => [
-                      `${formatNumber(Number(value), 1)}%`,
-                      "Utilization",
-                    ]}
-                  />
-                  <Bar
-                    dataKey="utilization"
-                    fill="oklch(0.45 0.12 155)"
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Per-Unit Breakdown ({filteredUnits.length})</CardTitle>
-        </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-muted-foreground">
-                <th className="pb-2 pr-4 font-medium">Unit</th>
-                <th className="pb-2 pr-4 font-medium">Driver</th>
-                <th className="pb-2 pr-4 font-medium">Engine hrs</th>
-                <th className="pb-2 pr-4 font-medium">Productive hrs</th>
-                <th className="pb-2 pr-4 font-medium">Idle hrs</th>
-                <th className="pb-2 font-medium">Utilization</th>
+              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="pb-3 pr-4 font-semibold w-10">#</th>
+                <th className="pb-3 pr-4 font-semibold">Vehicle</th>
+                <th className="pb-3 pr-4 font-semibold">Category</th>
+                <th className="pb-3 pr-4 font-semibold">Distance</th>
+                <th className="pb-3 pr-4 font-semibold">Engine hrs</th>
+                <th className="pb-3 pr-4 font-semibold">Km / hr</th>
+                <th className="pb-3 pr-4 font-semibold">Idle hrs</th>
+                <th className="pb-3 pr-4 font-semibold">Fuel consumed</th>
+                <th className="pb-3 font-semibold">Violations</th>
               </tr>
             </thead>
             <tbody>
-              {filteredUnits.map((u) => {
-                const onTarget = u.utilizationPercent >= fleet.targetPercent;
-                return (
-                  <tr key={u.unitId} className="border-b border-border/60">
-                    <td className="py-2.5 pr-4 font-medium">{u.unitName}</td>
-                    <td className="py-2.5 pr-4">{u.driverName ?? "—"}</td>
-                    <td className="py-2.5 pr-4">{formatNumber(u.engineHours, 1)}</td>
-                    <td className="py-2.5 pr-4">
-                      {formatNumber(u.productiveHours, 1)}
-                    </td>
-                    <td className="py-2.5 pr-4">{formatNumber(u.idleHours, 1)}</td>
-                    <td className="py-2.5">
-                      <Badge variant={onTarget ? "success" : "warning"}>
-                        {formatNumber(u.utilizationPercent, 1)}%
-                      </Badge>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredUnits.length === 0 && (
+              {pageRows.map((u, index) => (
+                <tr key={u.unitId} className="border-b border-border/60">
+                  <td className="py-2.5 pr-4 tabular-nums text-muted-foreground">
+                    {page * PAGE_SIZE + index + 1}
+                  </td>
+                  <td className="py-2.5 pr-4 font-medium">{u.unitName}</td>
+                  <td className="py-2.5 pr-4 text-muted-foreground">
+                    {u.category ?? "—"}
+                  </td>
+                  <td className="py-2.5 pr-4 font-semibold text-sky-700">
+                    {formatNumber(u.distanceKm, 1)} km
+                  </td>
+                  <td className="py-2.5 pr-4">
+                    {formatNumber(u.engineHours, 1)} hrs
+                  </td>
+                  <td className="py-2.5 pr-4 tabular-nums">
+                    {formatNumber(u.kmPerEngineHour, 1)}
+                  </td>
+                  <td className="py-2.5 pr-4">
+                    {formatNumber(u.idleHours, 1)} hrs
+                  </td>
+                  <td className="py-2.5 pr-4">
+                    {formatNumber(u.fuelConsumedLiters, 0)} L
+                  </td>
+                  <td className="py-2.5 tabular-nums">{u.violationCount}</td>
+                </tr>
+              ))}
+              {pageRows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={9}
                     className="py-8 text-center text-muted-foreground"
                   >
                     No units match your filters
@@ -252,8 +363,92 @@ export function UtilizationTab({ from, to }: Props) {
               )}
             </tbody>
           </table>
+
+          {filteredUnits.length > 0 && (
+            <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-4">
+              <p className="text-xs text-muted-foreground">
+                Showing {page * PAGE_SIZE + 1}–
+                {Math.min((page + 1) * PAGE_SIZE, filteredUnits.length)} of{" "}
+                {filteredUnits.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Previous
+                </button>
+                <span className="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground">
+                  {page + 1} / {pageCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                  disabled={page >= pageCount - 1}
+                  className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                >
+                  Next
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function UtilizationSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="h-14 animate-pulse rounded-xl bg-slate-200/60" />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-28 animate-pulse rounded-xl bg-slate-200/60" />
+        ))}
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="h-80 animate-pulse rounded-xl bg-slate-200/50" />
+        <div className="h-80 animate-pulse rounded-xl bg-slate-200/50" />
+      </div>
+    </div>
+  );
+}
+
+function MetricTile({
+  title,
+  value,
+  detail,
+  icon,
+  iconBg,
+  accent,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  icon: React.ReactNode;
+  iconBg: string;
+  accent: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+              {title}
+            </p>
+            <p className="mt-2 text-2xl font-bold tracking-tight">{value}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+          </div>
+          <div className={cn("rounded-lg p-2", iconBg)}>{icon}</div>
+        </div>
+      </div>
+      <div className={cn("h-1 w-full", accent)} />
     </div>
   );
 }

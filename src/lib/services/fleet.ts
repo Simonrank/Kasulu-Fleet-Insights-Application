@@ -2,10 +2,10 @@ import { eq, and, gte, lte, desc, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { units, dailyUnitMetrics, fuelEvents, driverIncidents } from "@/lib/db/schema";
 import {
-  resolveFleetCategory,
   categoryLabel,
-  type FleetCategory,
+  resolveFleetCategory,
 } from "@/lib/fleet/categories";
+import { incidentTypeLabel } from "@/lib/fleet/violations-model";
 import type { FleetSummary, UnitProblemsResponse, UnitProblem } from "@/lib/types";
 import { KPI_TARGETS } from "@/lib/utils";
 
@@ -23,9 +23,6 @@ export async function getFleetSummary(): Promise<FleetSummary> {
   const unitRows = rows.map((unit) => mapUnitRow(unit));
 
   for (const row of unitRows) {
-    if (row.categoryKey === "heavy_machine") heavyMachines++;
-    else lightVehicles++;
-
     if (row.isUpdating) updating++;
     else nonUpdating++;
 
@@ -49,19 +46,13 @@ export async function getFleetSummary(): Promise<FleetSummary> {
   };
 }
 
-const INCIDENT_LABELS: Record<string, string> = {
-  speed_violation: "Speed violation",
-  harsh_braking: "Harsh braking",
-  harsh_acceleration: "Harsh acceleration",
-  geo_fence_breach: "Geofence breach",
-  unauthorized_movement: "Unauthorized movement",
-  idle_exceedance: "Excessive idle time",
-};
-
 function mapUnitRow(
   unit: typeof units.$inferSelect
 ): FleetSummary["units"][number] {
-  const category = resolveFleetCategory(unit.vehicleType, unit.vehicleCategory);
+  const categoryKey = resolveFleetCategory(unit.vehicleType, unit.vehicleCategory);
+  const categoryDisplay = unit.vehicleCategory?.trim()
+    ? categoryLabel(categoryKey)
+    : "—";
 
   return {
     id: unit.id,
@@ -69,8 +60,8 @@ function mapUnitRow(
     name: unit.name,
     plateNumber: unit.plateNumber,
     vehicleType: unit.vehicleType,
-    category: unit.vehicleCategory ? categoryLabel(category) : "—",
-    categoryKey: category as FleetCategory,
+    category: categoryDisplay,
+    categoryKey: categoryDisplay === "—" ? null : categoryDisplay,
     driverName: unit.driverName,
     status: unit.status,
     isOnline: unit.isOnline,
@@ -169,8 +160,7 @@ export async function getUnitProblems(
     .orderBy(desc(driverIncidents.occurredAt));
 
   for (const incident of incidents) {
-    const label =
-      INCIDENT_LABELS[incident.incidentType] ?? incident.incidentType;
+    const label = incidentTypeLabel(incident.incidentType);
     const severity =
       incident.severity === "critical" || incident.severity === "high"
         ? incident.severity

@@ -5,11 +5,11 @@ import { useMemo, useState } from "react";
 import {
   Radio,
 } from "lucide-react";
-import { useDashboard } from "@/hooks/use-fleet-data";
+import { useDashboard, useSpeedViolations, useUnitLocations } from "@/hooks/use-fleet-data";
+import { emptySpeedViolationsSummary } from "@/lib/fleet/speed-violations-analytics";
 import { cn, formatNumber } from "@/lib/utils";
 import type {
   ConnectivityFilter,
-  FleetDataSource,
   FleetSummary,
   KpiSummary,
 } from "@/lib/types";
@@ -52,7 +52,6 @@ const CHART = {
 type Props = {
   from: string;
   to: string;
-  dataSource?: FleetDataSource;
 };
 
 function MetricCard({
@@ -231,7 +230,7 @@ function ConnectivityPanel({
   );
 }
 
-function DashboardContent({ from, to, dataSource = "google_sheets" }: Props) {
+function DashboardContent({ from, to }: Props) {
   const [connectivityFilter, setConnectivityFilter] =
     useState<ConnectivityFilter | null>(null);
 
@@ -244,11 +243,23 @@ function DashboardContent({ from, to, dataSource = "google_sheets" }: Props) {
     selectedUnit,
   } = useFleetIntelligenceFilters();
 
-  const { data: dashboard, isLoading, isFetching } = useDashboard(
-    from,
-    to,
-    dataSource
-  );
+  const { data: dashboard, isLoading, isFetching } = useDashboard(from, to);
+  const {
+    data: speedViolationsAsync,
+    isLoading: speedViolationsLoading,
+    isFetching: speedViolationsFetching,
+    error: speedViolationsError,
+  } = useSpeedViolations(from, to);
+  const {
+    data: unitLocations,
+    isLoading: unitLocationsLoading,
+    isFetching: unitLocationsFetching,
+    error: unitLocationsError,
+  } = useUnitLocations(from, to);
+  const speedViolations = speedViolationsAsync ?? emptySpeedViolationsSummary();
+  const speedChartLoading =
+    speedViolationsLoading ||
+    (speedViolationsFetching && speedViolations.totalEvents === 0);
   const kpis = dashboard?.kpis;
   const thefts = dashboard?.thefts;
   const fleet = dashboard?.fleet;
@@ -546,32 +557,48 @@ function DashboardContent({ from, to, dataSource = "google_sheets" }: Props) {
           </div>
         </div>
 
-        <SpeedViolationsChart data={dashboard.speedViolations} />
+        <SpeedViolationsChart
+          data={speedViolations}
+          isLoading={speedChartLoading}
+          isFetching={speedViolationsFetching}
+          error={
+            speedViolationsError instanceof Error
+              ? speedViolationsError.message
+              : null
+          }
+        />
 
         <div className="space-y-6">
           <TopViolatorsTable violators={thefts.topViolators} />
-          <CurrentAssetLocationTable rows={dashboard?.unitLatest ?? []} />
+          <CurrentAssetLocationTable
+            rows={unitLocations ?? []}
+            isLoading={
+              unitLocationsLoading ||
+              (unitLocationsFetching && (unitLocations?.length ?? 0) === 0)
+            }
+            error={
+              unitLocationsError instanceof Error
+                ? unitLocationsError.message
+                : null
+            }
+          />
         </div>
       </div>
     </div>
   );
 }
 
-export function FleetDashboard({
-  from,
-  to,
-  dataSource = "google_sheets",
-}: Props) {
-  const { data: dashboard, isLoading } = useDashboard(from, to, dataSource);
+export function FleetDashboard({ from, to }: Props) {
+  const { data: dashboard, isLoading } = useDashboard(from, to);
   const fleet = dashboard?.fleet;
 
-  if (isLoading && !dashboard?.kpis) {
+  if (isLoading && !dashboard) {
     return <DashboardSkeleton />;
   }
 
   return (
     <FleetIntelligenceRoot from={from} to={to} fleet={fleet}>
-      <DashboardContent from={from} to={to} dataSource={dataSource} />
+      <DashboardContent from={from} to={to} />
     </FleetIntelligenceRoot>
   );
 }

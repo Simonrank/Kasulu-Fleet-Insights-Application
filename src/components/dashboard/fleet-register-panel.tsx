@@ -15,7 +15,7 @@ import { VehicleSearch } from "@/components/dashboard/vehicle-search";
 import { Badge } from "@/components/ui/badge";
 import {
   DURATION_BANDS,
-  VEHICLE_TYPE_FILTER_OPTIONS,
+  buildCategoryFilterOptions,
   type VehicleTypeFilter,
 } from "@/lib/fleet/theft-filters";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,7 @@ type FleetFilterContextValue = {
   setDurationBand: (value: DurationBand) => void;
   displayedUnits: FleetUnitRow[];
   unitCategoryById: Map<string, FleetUnitRow["categoryKey"]>;
+  categoryFilterOptions: { value: VehicleTypeFilter; label: string }[];
   hasActiveFilters: boolean;
 };
 
@@ -69,6 +70,14 @@ export function FleetIntelligenceRoot({ from, to, fleet, children }: RootProps) 
   const [vehicleType, setVehicleType] = useState<VehicleTypeFilter>("all");
   const [theftType, setTheftType] = useState<TheftFilter>("all");
   const [durationBand, setDurationBand] = useState<DurationBand>("all");
+
+  const categoryFilterOptions = useMemo(
+    () =>
+      fleet
+        ? buildCategoryFilterOptions(fleet.units)
+        : [{ value: "all" as const, label: "All categories" }],
+    [fleet]
+  );
 
   const unitCategoryById = useMemo(() => {
     if (!fleet) return new Map<string, FleetUnitRow["categoryKey"]>();
@@ -137,6 +146,7 @@ export function FleetIntelligenceRoot({ from, to, fleet, children }: RootProps) 
         setDurationBand,
         displayedUnits,
         unitCategoryById,
+        categoryFilterOptions,
         hasActiveFilters,
       }}
     >
@@ -159,6 +169,7 @@ export function FleetIntelligenceWorkspace() {
     fleet,
     hasActiveFilters,
     selectedUnit,
+    categoryFilterOptions,
   } = useFleetIntelligenceFilters();
 
   const selectedLabel =
@@ -175,11 +186,11 @@ export function FleetIntelligenceWorkspace() {
       filters={[
         {
           id: "vehicle-type",
-          label: "Vehicle type",
+          label: "Category",
           value: vehicleType,
           onChange: (v) => setVehicleType(v as VehicleTypeFilter),
-          placeholder: "All vehicle types",
-          options: VEHICLE_TYPE_FILTER_OPTIONS.map((o) => ({
+          placeholder: "All categories",
+          options: categoryFilterOptions.map((o) => ({
             value: o.value,
             label: o.label,
           })),

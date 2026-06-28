@@ -5,9 +5,17 @@ export function emptySpeedViolationsSummary(): SpeedViolationsSummary {
   return {
     totalEvents: 0,
     totalMileageKm: 0,
+    speedLimitsKmh: [],
+    speedLimitLabel: null,
     byUnit: [],
     events: [],
   };
+}
+
+function buildSpeedLimitLabel(limits: number[]): string | null {
+  if (limits.length === 0) return null;
+  if (limits.length === 1) return `${limits[0]} km/h`;
+  return `${limits[0]}–${limits[limits.length - 1]} km/h`;
 }
 
 export function buildSpeedViolationsSummary(
@@ -26,8 +34,13 @@ export function buildSpeedViolationsSummary(
   };
 
   const byUnitMap = new Map<string, UnitAgg>();
+  const limitSet = new Set<number>();
 
   for (const row of rows) {
+    if (row.speedLimitKmh > 0) {
+      limitSet.add(row.speedLimitKmh);
+    }
+
     const current = byUnitMap.get(row.unitName) ?? {
       unitName: row.unitName,
       count: 0,
@@ -60,9 +73,13 @@ export function buildSpeedViolationsSummary(
     occurredAt: row.occurredAt?.toISOString() ?? null,
   }));
 
+  const speedLimitsKmh = [...limitSet].sort((a, b) => a - b);
+
   return {
     totalEvents: rows.length,
     totalMileageKm: rows.reduce((sum, row) => sum + row.mileageKm, 0),
+    speedLimitsKmh,
+    speedLimitLabel: buildSpeedLimitLabel(speedLimitsKmh),
     byUnit,
     events,
   };

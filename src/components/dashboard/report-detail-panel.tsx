@@ -97,7 +97,7 @@ export function ReportDetailPanel({
         ) : type === "violations" && fuelQuery.data && incidentsQuery.data ? (
           <ViolationsPreview
             fuelEvents={fuelQuery.data.events}
-            incidents={incidentsQuery.data}
+            incidents={incidentsQuery.data.incidents}
           />
         ) : type === "locations" && fleetQuery.data ? (
           <LocationsPreview units={fleetQuery.data.units} />

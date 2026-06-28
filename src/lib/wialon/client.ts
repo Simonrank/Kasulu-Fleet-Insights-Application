@@ -1,5 +1,5 @@
 import type { WialonUnit } from "@/lib/types";
-import { isWialonConfigured, wialonConfig } from "@/lib/config/env";
+import { isTelematicsConfigured, wialonConfig } from "@/lib/config/env";
 import type {
   WialonReportResult,
   WialonReportTable,
@@ -247,7 +247,7 @@ export class WialonClient {
 }
 
 export function createWialonClient(): WialonClient | null {
-  if (!isWialonConfigured()) {
+  if (!isTelematicsConfigured()) {
     return null;
   }
   return new WialonClient(wialonConfig.token, wialonConfig.apiUrl);

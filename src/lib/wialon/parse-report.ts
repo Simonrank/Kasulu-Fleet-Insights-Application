@@ -135,6 +135,10 @@ export function parseWialonFleetReportRow(
     date: parsedDate,
     distanceKm,
     engineHours,
+    productiveHours: null,
+    idleHours: null,
+    category: null,
+    theftType: null,
     initialFuelLevel,
     fuelFilledLiters,
     finalFuelLevel,
@@ -268,6 +272,14 @@ export type ParsedSpeedingRow = {
   occurredAt: Date | null;
 };
 
+export type ParsedWialonViolationRow = {
+  unitName: string;
+  violationText: string;
+  occurredAt: Date | null;
+  timeReceived: Date | null;
+  count: number;
+};
+
 function parseSpeedValue(raw: string, numeric: number): number {
   if (numeric > 0) return numeric;
   const match = raw.match(/([\d.]+)/);
@@ -331,3 +343,84 @@ export function parseWialonSpeedingRow(
     occurredAt: reportDate ?? null,
   };
 }
+
+function extractLocationFromViolationText(text: string): string | null {
+  const nearMatch = text.match(/near '([^']+)'/i);
+  if (nearMatch) return nearMatch[1];
+
+  const coordMatch = text.match(/maps\.google\.com\/\?q=(-?\d+\.?\d*),(-?\d+\.?\d*)/i);
+  if (coordMatch) {
+    return `${Number(coordMatch[1]).toFixed(4)}, ${Number(coordMatch[2]).toFixed(4)}`;
+  }
+
+  return null;
+}
+
+/** Wialon "Violations" report table row (level-2 nested, flat export). */
+export function parseWialonViolationRow(
+  headers: string[],
+  row: string[]
+): ParsedWialonViolationRow | null {
+  const map = headerIndexMap(headers);
+
+  const unitName = cell(
+    row,
+    resolveColumn(map, [
+      "grouping",
+      "unit",
+      "unit_name",
+      "name",
+      "object",
+      "registration",
+    ])
+  );
+
+  const violationText = cell(
+    row,
+    resolveColumn(map, [
+      "violation_text",
+      "violation text",
+      "violation",
+      "text",
+      "description",
+    ])
+  );
+
+  if (!unitName || !violationText.trim()) return null;
+
+  const occurredAt =
+    parseSheetDate(
+      cell(
+        row,
+        resolveColumn(map, [
+          "violation_time",
+          "violation time",
+          "time",
+          "begin",
+          "date",
+        ])
+      )
+    ) ?? null;
+
+  const timeReceived = parseSheetDate(
+    cell(
+      row,
+      resolveColumn(map, ["time_received", "time received", "received"])
+    )
+  );
+
+  const count = Math.max(
+    1,
+    cellNumber(row, resolveColumn(map, ["count", "quantity", "qty"]))
+  );
+
+  return {
+    unitName,
+    violationText: violationText.trim(),
+    occurredAt,
+    timeReceived,
+    count,
+  };
+}
+
+export { extractLocationFromViolationText };

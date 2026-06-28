@@ -1,7 +1,5 @@
 import { parseISO, isValid, parse } from "date-fns";
-import { classifyTheftType } from "@/lib/wialon/normalize";
-import { inferVehicleCategory } from "@/lib/fleet/categories";
-import type { driverIncidents } from "@/lib/db/schema";
+import type { TheftType } from "@/lib/types";
 
 export function normalizeHeader(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "_");
@@ -119,10 +117,7 @@ export function parseUnitRow(
     plateNumber: cell(row, resolveColumn(map, ["plate_number", "plate", "reg", "registration"])) || undefined,
     driverName: cell(row, resolveColumn(map, ["driver_name", "driver"])) || undefined,
     vehicleType: vehicleType || undefined,
-    vehicleCategory:
-      explicitCategory ||
-      inferVehicleCategory(vehicleType, name) ||
-      undefined,
+    vehicleCategory: explicitCategory || undefined,
     status: (cell(row, resolveColumn(map, ["status"])) as ParsedUnitRow["status"]) || "active",
   };
 }
@@ -193,18 +188,14 @@ export function parseFuelRow(
       cellNumber(row, resolveColumn(map, ["duration_minutes", "duration (min)", "duration"])) ||
       undefined,
     theftType:
-      eventType === "theft"
-        ? theftTypeRaw === "return_pipe" || theftTypeRaw === "return pipe"
-          ? "return_pipe"
-          : classifyTheftType(description ?? theftTypeRaw)
-        : undefined,
+      eventType === "theft" ? sheetTheftType(theftTypeRaw) ?? undefined : undefined,
   };
 }
 
 export type ParsedIncidentRow = {
   externalId: string;
   unitKey: string;
-  incidentType: typeof driverIncidents.$inferInsert.incidentType;
+  incidentType: string;
   occurredAt: Date;
   driverName?: string;
   severity?: string;
@@ -213,23 +204,16 @@ export type ParsedIncidentRow = {
   locationName?: string;
 };
 
-const INCIDENT_ALIASES: Record<string, typeof driverIncidents.$inferInsert.incidentType> = {
-  speed_violation: "speed_violation",
-  "speed violation": "speed_violation",
-  speed: "speed_violation",
-  harsh_braking: "harsh_braking",
-  "harsh braking": "harsh_braking",
-  harsh_acceleration: "harsh_acceleration",
-  "harsh acceleration": "harsh_acceleration",
-  geo_fence_breach: "geo_fence_breach",
-  geofence: "geo_fence_breach",
-  "geo fence breach": "geo_fence_breach",
-  unauthorized_movement: "unauthorized_movement",
-  "unauthorized movement": "unauthorized_movement",
-  idle_exceedance: "idle_exceedance",
-  "idle exceedance": "idle_exceedance",
-  idle: "idle_exceedance",
-};
+function slugIncidentType(raw: string): string {
+  return (
+    raw
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_|_$/g, "")
+      .slice(0, 80) || "incident"
+  );
+}
 
 export function parseIncidentRow(
   row: string[],
@@ -246,16 +230,11 @@ export function parseIncidentRow(
   const typeRaw = cell(
     row,
     resolveColumn(map, ["incident_type", "incident type", "type"])
-  ).toLowerCase();
+  );
 
-  if (!unitKey || !occurredAt || !typeRaw) return null;
+  if (!unitKey || !occurredAt || !typeRaw.trim()) return null;
 
-  const incidentType =
-    INCIDENT_ALIASES[typeRaw] ??
-    INCIDENT_ALIASES[typeRaw.replace(/\s+/g, "_")] ??
-    null;
-
-  if (!incidentType) return null;
+  const incidentType = slugIncidentType(typeRaw);
 
   return {
     externalId:
@@ -277,8 +256,8 @@ export type ParsedMetricRow = {
   date: Date;
   distanceKm: number;
   engineHours: number;
-  productiveHours: number;
-  idleHours: number;
+  productiveHours: number | null;
+  idleHours: number | null;
   fuelConsumedLiters: number;
   fuelFilledLiters: number;
 };
@@ -299,14 +278,16 @@ export function parseMetricRow(
     row,
     resolveColumn(map, ["engine_hours", "engine hrs", "engine hours"])
   );
-  const productiveHours =
-    cellNumber(
-      row,
-      resolveColumn(map, ["productive_hours", "productive hrs"])
-    ) || engineHours * 0.75;
-  const idleHours =
-    cellNumber(row, resolveColumn(map, ["idle_hours", "idle hrs"])) ||
-    Math.max(engineHours - productiveHours, 0);
+  const productiveHours = optionalCellNumber(
+    row,
+    map,
+    ["productive_hours", "productive hrs"]
+  );
+  const idleHours = optionalCellNumber(
+    row,
+    map,
+    ["idle_hours", "idle hrs"]
+  );
 
   return {
     unitKey,
@@ -329,13 +310,17 @@ export function parseMetricRow(
   };
 }
 
-/** Kasulu live fleet sheet — all fields map 1:1 to Google Sheet columns */
+/** Kasulu live fleet sheet — fields map to Google Sheet columns when present */
 export type ParsedKasuluFleetRow = {
   machineId: string;
   lastMessageAt: Date | null;
   date: Date;
   distanceKm: number;
   engineHours: number;
+  productiveHours: number | null;
+  idleHours: number | null;
+  category: string | null;
+  theftType: string | null;
   initialFuelLevel: number;
   fuelFilledLiters: number;
   finalFuelLevel: number;
@@ -364,6 +349,40 @@ export function connectivityFromSheet(
   if (normalized.includes("not updating")) return false;
   if (!lastMessageAt) return false;
   return true;
+}
+
+/** Theft type only when the sheet provides an explicit column value. */
+export function sheetTheftType(raw: string | null | undefined): TheftType | null {
+  if (!raw?.trim()) return null;
+  const normalized = raw.trim().toLowerCase().replace(/\s+/g, "_");
+  if (normalized === "return_pipe" || normalized === "return") {
+    return "return_pipe";
+  }
+  if (normalized === "direct") return "direct";
+  return null;
+}
+
+function optionalCellNumber(
+  row: string[],
+  map: Map<string, number>,
+  aliases: string[]
+): number | null {
+  const idx = resolveColumn(map, aliases);
+  if (idx == null) return null;
+  const raw = cell(row, idx);
+  if (!raw) return null;
+  return cellNumber(row, idx);
+}
+
+function optionalCell(
+  row: string[],
+  map: Map<string, number>,
+  aliases: string[]
+): string | null {
+  const idx = resolveColumn(map, aliases);
+  if (idx == null) return null;
+  const value = cell(row, idx);
+  return value || null;
 }
 
 export function parseKasuluFleetRow(
@@ -396,6 +415,29 @@ export function parseKasuluFleetRow(
       row,
       resolveColumn(map, ["engine_hours", "engine hours"])
     ),
+    productiveHours: optionalCellNumber(row, map, [
+      "productive_hours",
+      "productive hours",
+      "productive hrs",
+    ]),
+    idleHours: optionalCellNumber(row, map, [
+      "idle_hours",
+      "idle hours",
+      "idle hrs",
+      "idling_hours",
+    ]),
+    category: optionalCell(row, map, [
+      "category",
+      "vehicle_category",
+      "vehicle category",
+      "fleet_category",
+      "type",
+    ]),
+    theftType: optionalCell(row, map, [
+      "theft_type",
+      "theft type",
+      "fuel_theft_type",
+    ]),
     initialFuelLevel: cellNumber(
       row,
       resolveColumn(map, ["initial_fuel_level", "initial fuel level"])

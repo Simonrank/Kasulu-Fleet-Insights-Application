@@ -25,6 +25,10 @@ export function triggerGoogleSheetsSyncIfStale(): void {
           "@/lib/google-sheets/dashboard-cache"
         );
         clearDashboardAggregateCache();
+        const { clearUtilizationAggregateCache } = await import(
+          "@/lib/google-sheets/utilization-cache"
+        );
+        clearUtilizationAggregateCache();
       }
     } finally {
       syncInFlight = null;

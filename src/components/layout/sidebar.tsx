@@ -37,9 +37,10 @@ type Props = {
   active: NavView;
   onNavigate: (view: NavView) => void;
   onExpandChange?: (expanded: boolean) => void;
+  onPrefetch?: (view: NavView) => void;
 };
 
-export function Sidebar({ active, onNavigate, onExpandChange }: Props) {
+export function Sidebar({ active, onNavigate, onExpandChange, onPrefetch }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -79,6 +80,8 @@ export function Sidebar({ active, onNavigate, onExpandChange }: Props) {
                 type="button"
                 title={label}
                 aria-current={isActive ? "page" : undefined}
+                onMouseEnter={() => onPrefetch?.(id)}
+                onFocus={() => onPrefetch?.(id)}
                 onClick={() => onNavigate(id)}
                 className={cn(
                   "sidebar__nav-btn",

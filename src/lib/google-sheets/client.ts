@@ -32,7 +32,11 @@ function loadCredentials(): ServiceAccountCredentials | null {
   }
 }
 
+let sheetsClient: sheets_v4.Sheets | null = null;
+
 export function createSheetsClient(): sheets_v4.Sheets | null {
+  if (sheetsClient) return sheetsClient;
+
   const credentials = loadCredentials();
   if (!credentials?.client_email || !credentials?.private_key) {
     return null;
@@ -44,7 +48,8 @@ export function createSheetsClient(): sheets_v4.Sheets | null {
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
   });
 
-  return google.sheets({ version: "v4", auth });
+  sheetsClient = google.sheets({ version: "v4", auth });
+  return sheetsClient;
 }
 
 export async function fetchSheetRange(

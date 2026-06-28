@@ -12,7 +12,8 @@ import type {
   ParsedUnitLatestRow,
 } from "@/lib/wialon/parse-report";
 
-const CACHE_TTL_MS = 90_000;
+const CACHE_TTL_MS = 120_000;
+const UNIT_ID_TTL_MS = 5 * 60_000;
 
 export type FleetDataset = {
   rows: ParsedKasuluFleetRow[];
@@ -23,17 +24,29 @@ export type FleetDataset = {
   unitLatestSnapshots?: ParsedUnitLatestRow[];
   /** Wialon "Speedings" rows for the reporting period */
   speedViolations?: ParsedSpeedingRow[];
+  /** Wialon "Violations" rows (fuel theft, zone speed, geofence, etc.) */
+  wialonViolations?: import("@/lib/wialon/parse-report").ParsedWialonViolationRow[];
 };
 
 let cache: FleetDataset | null = null;
 let loadPromise: Promise<FleetDataset> | null = null;
+let unitIdCache: { map: Map<string, string>; fetchedAt: number } | null = null;
 
 async function loadUnitIdMap(): Promise<Map<string, string>> {
+  if (
+    unitIdCache &&
+    Date.now() - unitIdCache.fetchedAt < UNIT_ID_TTL_MS
+  ) {
+    return unitIdCache.map;
+  }
+
   try {
     const rows = await db.select({ id: units.id, name: units.name }).from(units);
-    return new Map(rows.map((r) => [r.name, r.id]));
+    const map = new Map(rows.map((r) => [r.name, r.id]));
+    unitIdCache = { map, fetchedAt: Date.now() };
+    return map;
   } catch {
-    return new Map();
+    return unitIdCache?.map ?? new Map();
   }
 }
 
@@ -88,7 +101,11 @@ export function prefetchFleetDataset(): void {
     const { getDashboardBundle } = await import(
       "@/lib/google-sheets/dashboard-cache"
     );
+    const { getUtilizationBundle } = await import(
+      "@/lib/google-sheets/utilization-cache"
+    );
     getDashboardBundle(dataset, from, to);
+    getUtilizationBundle(dataset, from, to);
   })();
 }
 

@@ -1,16 +1,19 @@
 import type { DurationBand, FuelTheftDetail, TheftFilter } from "@/lib/types";
-import type { FleetCategory } from "@/lib/fleet/categories";
 
-export type VehicleTypeFilter = "all" | "heavy_machine" | "light_vehicle";
+export type VehicleTypeFilter = "all" | string;
 
-export const VEHICLE_TYPE_FILTER_OPTIONS: {
-  value: VehicleTypeFilter;
-  label: string;
-}[] = [
-  { value: "all", label: "All vehicle types" },
-  { value: "heavy_machine", label: "Heavy machines" },
-  { value: "light_vehicle", label: "Light vehicles" },
-];
+export function buildCategoryFilterOptions(
+  units: { category: string }[]
+): { value: VehicleTypeFilter; label: string }[] {
+  const categories = [
+    ...new Set(units.map((u) => u.category).filter((c) => c && c !== "—")),
+  ].sort((a, b) => a.localeCompare(b));
+
+  return [
+    { value: "all", label: "All categories" },
+    ...categories.map((category) => ({ value: category, label: category })),
+  ];
+}
 
 export const DURATION_BANDS: {
   value: DurationBand;
@@ -51,7 +54,7 @@ export function filterTheftEvents(
     theftType: TheftFilter;
     durationBand: DurationBand;
     vehicleType?: VehicleTypeFilter;
-    unitCategoryById?: Map<string, FleetCategory>;
+    unitCategoryById?: Map<string, string | null>;
     unitId?: string | null;
   }
 ): FuelTheftDetail[] {
@@ -76,7 +79,7 @@ export function filterTheftEvents(
       options.unitCategoryById
     ) {
       const category = options.unitCategoryById.get(event.unitId);
-      if (category !== options.vehicleType) {
+      if (!category || category !== options.vehicleType) {
         return false;
       }
     }

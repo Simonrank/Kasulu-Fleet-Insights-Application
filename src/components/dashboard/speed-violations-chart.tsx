@@ -22,6 +22,9 @@ const CHART = {
 
 type Props = {
   data: SpeedViolationsSummary;
+  isLoading?: boolean;
+  isFetching?: boolean;
+  error?: string | null;
 };
 
 function formatDuration(minutes: number): string {
@@ -31,7 +34,12 @@ function formatDuration(minutes: number): string {
   return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
-export function SpeedViolationsChart({ data }: Props) {
+export function SpeedViolationsChart({
+  data,
+  isLoading = false,
+  isFetching = false,
+  error = null,
+}: Props) {
   const chartData = useMemo(
     () =>
       data.byUnit.slice(0, 10).map((unit) => ({
@@ -60,12 +68,25 @@ export function SpeedViolationsChart({ data }: Props) {
             km over limit · top units by violation count
           </p>
         </div>
-        <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
-          Limit 80 km/h
-        </span>
+        {data.speedLimitLabel && (
+          <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+            Limit {data.speedLimitLabel}
+          </span>
+        )}
       </div>
 
-      {chartData.length === 0 ? (
+      {isLoading || (isFetching && data.totalEvents === 0) ? (
+        <div className="py-16 text-center">
+          <p className="text-sm font-medium text-dash-foreground">
+            Loading speeding violations…
+          </p>
+          <p className="mt-2 text-xs text-dash-muted">
+            Live report data — each day in the range can take a few minutes.
+          </p>
+        </div>
+      ) : error ? (
+        <p className="py-16 text-center text-sm text-red-600">{error}</p>
+      ) : chartData.length === 0 ? (
         <p className="py-16 text-center text-sm text-dash-muted">
           No speeding violations in this period
         </p>

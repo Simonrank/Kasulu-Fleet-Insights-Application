@@ -27,6 +27,10 @@ export type UnitLatestRow = {
 export type SpeedViolationsSummary = {
   totalEvents: number;
   totalMileageKm: number;
+  /** Distinct speed limits present in Wialon Speedings data */
+  speedLimitsKmh: number[];
+  /** Human-readable label derived from speedLimitsKmh, e.g. "65 km/h" or "60–80 km/h" */
+  speedLimitLabel: string | null;
   byUnit: Array<{
     unitName: string;
     count: number;
@@ -49,6 +53,7 @@ export type DashboardBundle = {
   kpis: KpiSummary;
   thefts: FuelTheftsResponse;
   fleet: FleetSummary;
+  utilization?: UtilizationSummary;
   unitLatest: UnitLatestRow[];
   speedViolations: SpeedViolationsSummary;
   fetchedAt: string;
@@ -74,21 +79,26 @@ export type UtilizationUnitRow = {
   unitId: string;
   unitName: string;
   driverName: string | null;
+  category?: string | null;
+  distanceKm: number;
   engineHours: number;
   productiveHours: number;
   idleHours: number;
-  utilizationPercent: number;
+  fuelConsumedLiters: number;
+  violationCount: number;
+  kmPerEngineHour: number;
 };
 
 export type UtilizationSummary = {
   fleet: {
-    utilizationPercent: number;
-    targetPercent: number;
-    engineHours: number;
-    productiveHours: number;
-    idleHours: number;
+    totalDistanceKm: number;
+    totalEngineHours: number;
+    totalProductiveHours: number;
+    totalIdleHours: number;
+    avgKmPerEngineHour: number;
   };
   byUnit: UtilizationUnitRow[];
+  distanceBuckets: Array<{ label: string; count: number }>;
   period: { from: string; to: string };
 };
 
@@ -99,7 +109,7 @@ export type FleetUnitRow = {
   plateNumber: string | null;
   vehicleType: string | null;
   category: string;
-  categoryKey: FleetCategory;
+  categoryKey: string | null;
   driverName: string | null;
   status: string;
   isOnline: boolean;
@@ -206,7 +216,7 @@ export type FuelTheftsResponse = {
   };
   theftByCategory: Array<{
     category: string;
-    categoryKey: FleetCategory;
+    categoryKey: string;
     directLiters: number;
     returnPipeLiters: number;
     totalLiters: number;
@@ -222,6 +232,14 @@ export type FuelTheftsResponse = {
   events: FuelTheftDetail[];
 };
 
+export type ViolationsSummary = {
+  total: number;
+  byType: Record<string, number>;
+  bySeverity: Record<string, number>;
+  topUnits: Array<{ unitName: string; count: number }>;
+  criticalCount: number;
+};
+
 export type DriverIncidentRow = {
   id: string;
   unitId: string;
@@ -233,6 +251,15 @@ export type DriverIncidentRow = {
   threshold: number | null;
   occurredAt: string;
   locationName: string | null;
+  description?: string | null;
+  durationMinutes?: number | null;
+  source?: "live_violations" | "live_speedings";
+};
+
+export type DriverIncidentsResponse = {
+  incidents: DriverIncidentRow[];
+  summary: ViolationsSummary;
+  source: "live";
 };
 
 export type ReportSummary = {

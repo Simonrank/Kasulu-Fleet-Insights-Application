@@ -1,13 +1,8 @@
 import { startOfDay } from "date-fns";
 import {
-  categoryLabel,
-  CATEGORY_LABELS,
-  inferVehicleCategory,
-  type FleetCategory,
-} from "@/lib/fleet/categories";
-import {
   connectivityFromSheet,
   internalUnitIdFromSheetKey,
+  sheetTheftType,
   type ParsedKasuluFleetRow,
 } from "@/lib/google-sheets/parse";
 import type {
@@ -21,7 +16,6 @@ import type {
   UnitPerformance,
 } from "@/lib/types";
 import { averageSheetMetric } from "@/lib/utils";
-import { classifyTheftType } from "@/lib/wialon/normalize";
 import type { FleetDataset } from "@/lib/google-sheets/fleet-dataset";
 import { buildUnitLatestRows } from "@/lib/fleet/unit-latest";
 import {
@@ -68,17 +62,20 @@ export function buildDashboardFromSheet(
   type UnitAgg = {
     unitId: string;
     reg: string;
-    category: FleetCategory;
+    categoryLabel: string | null;
     distanceKm: number;
     fuelConsumedLiters: number;
     fuelFilledLiters: number;
     engineHours: number;
+    productiveHours: number;
     kmPerLiter: number[];
     litersPerHour: number[];
     directTheftLiters: number;
     returnPipeTheftLiters: number;
+    untypedTheftLiters: number;
     directCount: number;
     returnPipeCount: number;
+    untypedCount: number;
   };
 
   const unitAgg = new Map<string, UnitAgg>();
@@ -91,12 +88,12 @@ export function buildDashboardFromSheet(
   let fillingCount = 0;
   let fillingVolume = 0;
 
-  const categoryTheft = new Map<FleetCategory, { direct: number; returnPipe: number }>();
+  const categoryTheft = new Map<string, { direct: number; returnPipe: number }>();
 
   for (const row of periodRows) {
     totalDistanceKm += row.distanceKm;
     totalEngineHours += row.engineHours;
-    totalProductiveHours += row.engineHours * 0.75;
+    if (row.productiveHours != null) totalProductiveHours += row.productiveHours;
     totalFuelLiters += row.fuelConsumedLiters;
 
     if (row.kmPerLiter > 0) kmPerLiterSamples.push(row.kmPerLiter);
@@ -107,7 +104,7 @@ export function buildDashboardFromSheet(
       fillingVolume += row.fuelFilledLiters;
     }
 
-    const category = inferVehicleCategory(null, row.machineId);
+    const categoryLabelValue = row.category?.trim() || null;
     const unitId = resolveUnitId(row.machineId, unitIds);
 
     let agg = unitAgg.get(row.machineId);
@@ -115,17 +112,20 @@ export function buildDashboardFromSheet(
       agg = {
         unitId,
         reg: row.machineId.split("—")[0]?.trim() ?? row.machineId,
-        category,
+        categoryLabel: categoryLabelValue,
         distanceKm: 0,
         fuelConsumedLiters: 0,
         fuelFilledLiters: 0,
         engineHours: 0,
+        productiveHours: 0,
         kmPerLiter: [],
         litersPerHour: [],
         directTheftLiters: 0,
         returnPipeTheftLiters: 0,
+        untypedTheftLiters: 0,
         directCount: 0,
         returnPipeCount: 0,
+        untypedCount: 0,
       };
       unitAgg.set(row.machineId, agg);
     }
@@ -134,38 +134,46 @@ export function buildDashboardFromSheet(
     agg.fuelConsumedLiters += row.fuelConsumedLiters;
     agg.fuelFilledLiters += row.fuelFilledLiters;
     agg.engineHours += row.engineHours;
+    if (row.productiveHours != null) agg.productiveHours += row.productiveHours;
     if (row.kmPerLiter > 0) agg.kmPerLiter.push(row.kmPerLiter);
     if (row.litersPerHour > 0) agg.litersPerHour.push(row.litersPerHour);
 
     if (row.fuelTheftLiters > 0) {
-      const theftType: TheftType = classifyTheftType(row.comment);
-      const catEntry = categoryTheft.get(category) ?? { direct: 0, returnPipe: 0 };
+      const typed = sheetTheftType(row.theftType);
+      const catKey = categoryLabelValue ?? "Uncategorized";
+      const catEntry = categoryTheft.get(catKey) ?? { direct: 0, returnPipe: 0 };
 
-      if (theftType === "return_pipe") {
+      if (typed === "return_pipe") {
         returnPipeTheftCount++;
         returnPipeTheftVolume += row.fuelTheftLiters;
         agg.returnPipeTheftLiters += row.fuelTheftLiters;
         agg.returnPipeCount++;
         catEntry.returnPipe += row.fuelTheftLiters;
-      } else {
+      } else if (typed === "direct") {
         directTheftCount++;
         directTheftVolume += row.fuelTheftLiters;
         agg.directTheftLiters += row.fuelTheftLiters;
         agg.directCount++;
         catEntry.direct += row.fuelTheftLiters;
+      } else {
+        directTheftCount++;
+        directTheftVolume += row.fuelTheftLiters;
+        agg.untypedTheftLiters += row.fuelTheftLiters;
+        agg.untypedCount++;
+        catEntry.direct += row.fuelTheftLiters;
       }
-      categoryTheft.set(category, catEntry);
+      categoryTheft.set(catKey, catEntry);
 
       events.push({
         id: theftEventId(row.machineId, row.date),
         unitId,
         unitName: row.machineId,
-        theftType,
+        theftType: typed ?? "direct",
         volumeLiters: row.fuelTheftLiters,
         durationMinutes: null,
         occurredAt: row.date.toISOString(),
         locationName: null,
-        description: row.comment || null,
+        description: row.comment || row.theftType || null,
       });
     }
   }
@@ -175,26 +183,23 @@ export function buildDashboardFromSheet(
   );
 
   let updatingUnits = 0;
-  let heavyMachines = 0;
-  let lightVehicles = 0;
 
   const fleetUnits: FleetSummary["units"] = [];
 
   for (const [machineId, latest] of latestByMachine) {
     const isOnline = connectivityFromSheet(latest.comment, latest.lastMessageAt);
     if (isOnline) updatingUnits++;
-    const categoryKey = inferVehicleCategory(null, machineId);
-    if (categoryKey === "heavy_machine") heavyMachines++;
-    else lightVehicles++;
+
+    const categoryDisplay = latest.category?.trim() || "—";
 
     fleetUnits.push({
       id: resolveUnitId(machineId, unitIds),
       wialonId: internalUnitIdFromSheetKey(machineId),
       name: machineId,
       plateNumber: machineId.split("—")[0]?.trim() ?? machineId,
-      vehicleType: null,
-      category: categoryLabel(categoryKey),
-      categoryKey,
+      vehicleType: latest.category,
+      category: categoryDisplay,
+      categoryKey: categoryDisplay === "—" ? null : categoryDisplay,
       driverName: null,
       status: "active",
       isOnline,
@@ -210,7 +215,9 @@ export function buildDashboardFromSheet(
 
   const totalUnits = latestByMachine.size;
   const utilizationPercent =
-    totalEngineHours > 0 ? (totalProductiveHours / totalEngineHours) * 100 : 0;
+    totalEngineHours > 0 && totalProductiveHours > 0
+      ? (totalProductiveHours / totalEngineHours) * 100
+      : 0;
 
   const consumptionKmPerLiter = averageSheetMetric(kmPerLiterSamples);
   const consumptionLitersPerHour = averageSheetMetric(litersPerHourSamples);
@@ -248,7 +255,7 @@ export function buildDashboardFromSheet(
     return {
       unitId: u.unitId,
       reg: u.reg,
-      category: categoryLabel(u.category),
+      category: u.categoryLabel ?? "—",
       distanceKm: u.distanceKm,
       fuelConsumedLiters: u.fuelConsumedLiters,
       directTheftLiters: u.directTheftLiters,
@@ -262,10 +269,11 @@ export function buildDashboardFromSheet(
   });
 
   const violatorBase: UnitPerformance[] = [...unitAgg.values()]
-    .filter((u) => u.directCount + u.returnPipeCount > 0)
+    .filter((u) => u.directCount + u.returnPipeCount + u.untypedCount > 0)
     .map((u) => {
-      const theftCount = u.directCount + u.returnPipeCount;
-      const theftVolumeLiters = u.directTheftLiters + u.returnPipeTheftLiters;
+      const theftCount = u.directCount + u.returnPipeCount + u.untypedCount;
+      const theftVolumeLiters =
+        u.directTheftLiters + u.returnPipeTheftLiters + u.untypedTheftLiters;
       const engineH = u.engineHours || 1;
       return {
         unitId: u.unitId,
@@ -292,18 +300,18 @@ export function buildDashboardFromSheet(
     .slice(0, 10)
     .map((p, i) => ({ ...p, rank: i + 1 }));
 
-  const theftByCategory = (Object.keys(CATEGORY_LABELS) as FleetCategory[]).map(
-    (key) => {
-      const data = categoryTheft.get(key) ?? { direct: 0, returnPipe: 0 };
-      return {
-        category: CATEGORY_LABELS[key],
-        categoryKey: key,
-        directLiters: data.direct,
-        returnPipeLiters: data.returnPipe,
-        totalLiters: data.direct + data.returnPipe,
-      };
-    }
-  );
+  const theftByCategory = [...categoryTheft.entries()]
+    .map(([category, data]) => ({
+      category,
+      categoryKey: category,
+      directLiters: data.direct,
+      returnPipeLiters: data.returnPipe,
+      totalLiters: data.direct + data.returnPipe,
+    }))
+    .sort((a, b) => b.totalLiters - a.totalLiters);
+
+  const heavyMachines = 0;
+  const lightVehicles = 0;
 
   const totalDrainVolume = directTheftVolume + returnPipeTheftVolume;
 

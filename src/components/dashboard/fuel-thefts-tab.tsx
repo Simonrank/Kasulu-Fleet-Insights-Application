@@ -7,10 +7,10 @@ import { TabWorkspace } from "@/components/dashboard/tab-workspace";
 import { useFuelThefts } from "@/hooks/use-fleet-data";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatNumber } from "@/lib/utils";
-import type { DurationBand, FleetDataSource, TheftFilter } from "@/lib/types";
+import type { DurationBand, TheftFilter } from "@/lib/types";
 import {
   DURATION_BANDS,
-  VEHICLE_TYPE_FILTER_OPTIONS,
+  buildCategoryFilterOptions,
   filterTheftEvents,
   type VehicleTypeFilter,
 } from "@/lib/fleet/theft-filters";
@@ -27,7 +27,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { CATEGORY_LABELS } from "@/lib/fleet/categories";
 import type { FuelFleetRow } from "@/lib/types";
 
 const THEFT_CHART = {
@@ -43,7 +42,6 @@ const THEFT_CHART = {
 type Props = {
   from: string;
   to: string;
-  dataSource?: FleetDataSource;
 };
 
 function MetricCard({
@@ -285,29 +283,30 @@ function FleetMetricsTable({
   );
 }
 
-export function FuelTheftsTab({
-  from,
-  to,
-  dataSource = "google_sheets",
-}: Props) {
+export function FuelTheftsTab({ from, to }: Props) {
   const [type, setType] = useState<TheftFilter>("all");
   const [search, setSearch] = useState("");
   const [durationBand, setDurationBand] = useState<DurationBand>("all");
   const [vehicleType, setVehicleType] = useState<VehicleTypeFilter>("all");
-  const { data, isLoading } = useFuelThefts(from, to, type, dataSource);
+  const { data, isLoading } = useFuelThefts(from, to, type);
 
   const unitCategoryById = useMemo(() => {
-    if (!data) return new Map<string, "heavy_machine" | "light_vehicle">();
+    if (!data) return new Map<string, string | null>();
     return new Map(
-      data.fleetTable.map((row) => {
-        const key =
-          row.category === CATEGORY_LABELS.light_vehicle
-            ? "light_vehicle"
-            : "heavy_machine";
-        return [row.unitId, key] as const;
-      })
+      data.fleetTable.map((row) => [
+        row.unitId,
+        row.category === "—" ? null : row.category,
+      ])
     );
   }, [data]);
+
+  const categoryFilterOptions = useMemo(
+    () =>
+      data
+        ? buildCategoryFilterOptions(data.fleetTable.map((r) => ({ category: r.category })))
+        : [{ value: "all" as const, label: "All categories" }],
+    [data]
+  );
 
   const filteredEvents = useMemo(() => {
     if (!data) return [];
@@ -451,11 +450,11 @@ export function FuelTheftsTab({
         filters={[
           {
             id: "vehicle-type",
-            label: "Vehicle type",
+            label: "Category",
             value: vehicleType,
             onChange: (v) => setVehicleType(v as VehicleTypeFilter),
-            placeholder: "All vehicle types",
-            options: VEHICLE_TYPE_FILTER_OPTIONS.map((o) => ({
+            placeholder: "All categories",
+            options: categoryFilterOptions.map((o) => ({
               value: o.value,
               label: o.label,
             })),

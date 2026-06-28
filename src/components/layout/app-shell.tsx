@@ -1,16 +1,72 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import type { FleetDataSource } from "@/lib/types";
 import { format, subDays } from "date-fns";
 import { Sidebar, type NavView } from "@/components/layout/sidebar";
-import { DataSourceToggle } from "@/components/layout/data-source-toggle";
-import { FleetDashboard } from "@/components/dashboard/fleet-dashboard";
-import { FuelTheftsTab } from "@/components/dashboard/fuel-thefts-tab";
-import { DriverIncidentsTab } from "@/components/dashboard/driver-incidents-tab";
-import { UtilizationTab } from "@/components/dashboard/utilization-tab";
-import { ReportsTab } from "@/components/dashboard/reports-tab";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import {
+  prefetchFleetQueries,
+  useQueryClient,
+} from "@/hooks/use-fleet-data";
+
+const FleetDashboard = dynamic(
+  () =>
+    import("@/components/dashboard/fleet-dashboard").then((m) => ({
+      default: m.FleetDashboard,
+    })),
+  { loading: () => <TabSkeleton /> }
+);
+
+const FuelTheftsTab = dynamic(
+  () =>
+    import("@/components/dashboard/fuel-thefts-tab").then((m) => ({
+      default: m.FuelTheftsTab,
+    })),
+  { loading: () => <TabSkeleton /> }
+);
+
+const DriverIncidentsTab = dynamic(
+  () =>
+    import("@/components/dashboard/driver-incidents-tab").then((m) => ({
+      default: m.DriverIncidentsTab,
+    })),
+  { loading: () => <TabSkeleton /> }
+);
+
+const UtilizationTab = dynamic(
+  () =>
+    import("@/components/dashboard/utilization-tab").then((m) => ({
+      default: m.UtilizationTab,
+    })),
+  { loading: () => <TabSkeleton /> }
+);
+
+const ReportsTab = dynamic(
+  () =>
+    import("@/components/dashboard/reports-tab").then((m) => ({
+      default: m.ReportsTab,
+    })),
+  { loading: () => <TabSkeleton /> }
+);
+
+function TabSkeleton() {
+  return (
+    <div className="space-y-4 p-6 md:p-8">
+      <div className="h-10 w-48 animate-pulse rounded-lg bg-slate-200/70" />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="h-28 animate-pulse rounded-xl bg-slate-200/60"
+          />
+        ))}
+      </div>
+      <div className="h-72 animate-pulse rounded-xl bg-slate-200/50" />
+    </div>
+  );
+}
 
 const PAGE_TITLES: Record<NavView, string> = {
   dashboard: "Dashboard",
@@ -21,16 +77,29 @@ const PAGE_TITLES: Record<NavView, string> = {
 };
 
 export function AppShell() {
+  const queryClient = useQueryClient();
   const [view, setView] = useState<NavView>("dashboard");
   const [from, setFrom] = useState(() => subDays(new Date(), 7).toISOString());
   const [to, setTo] = useState(() => new Date().toISOString());
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
-  const [dataSource, setDataSource] = useState<FleetDataSource>("google_sheets");
-  const dualSourceEnabled =
-    process.env.NEXT_PUBLIC_DUAL_SOURCE === "true";
+
+  const debouncedFrom = useDebouncedValue(from, 350);
+  const debouncedTo = useDebouncedValue(to, 350);
+
   const handleSidebarExpand = useCallback((expanded: boolean) => {
     setSidebarExpanded(expanded);
   }, []);
+
+  const handlePrefetch = useCallback(
+    (_target: NavView) => {
+      prefetchFleetQueries(queryClient, debouncedFrom, debouncedTo);
+    },
+    [queryClient, debouncedFrom, debouncedTo]
+  );
+
+  useEffect(() => {
+    prefetchFleetQueries(queryClient, debouncedFrom, debouncedTo);
+  }, [queryClient, debouncedFrom, debouncedTo]);
 
   return (
     <div
@@ -43,6 +112,7 @@ export function AppShell() {
         active={view}
         onNavigate={setView}
         onExpandChange={handleSidebarExpand}
+        onPrefetch={handlePrefetch}
       />
 
       <div className="app-shell-main flex min-w-0 flex-col">
@@ -62,9 +132,6 @@ export function AppShell() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white/90 p-2 shadow-sm">
-                {dualSourceEnabled && (
-                  <DataSourceToggle value={dataSource} onChange={setDataSource} />
-                )}
                 <input
                   type="date"
                   value={format(new Date(from), "yyyy-MM-dd")}
@@ -89,9 +156,6 @@ export function AppShell() {
 
         {view === "dashboard" && (
           <div className="dash-toolbar sticky top-0 z-30 flex flex-wrap items-center justify-end gap-2 backdrop-blur-md">
-            {dualSourceEnabled && (
-              <DataSourceToggle value={dataSource} onChange={setDataSource} />
-            )}
             <input
               type="date"
               value={format(new Date(from), "yyyy-MM-dd")}
@@ -120,16 +184,16 @@ export function AppShell() {
           }
         >
           {view === "dashboard" && (
-            <FleetDashboard from={from} to={to} dataSource={dataSource} />
+            <FleetDashboard from={debouncedFrom} to={debouncedTo} />
           )}
           {view === "utilization" && (
-            <UtilizationTab from={from} to={to} />
+            <UtilizationTab from={debouncedFrom} to={debouncedTo} />
           )}
           {view === "fuel-thefts" && (
-            <FuelTheftsTab from={from} to={to} dataSource={dataSource} />
+            <FuelTheftsTab from={debouncedFrom} to={debouncedTo} />
           )}
           {view === "driver-incidents" && (
-            <DriverIncidentsTab from={from} to={to} />
+            <DriverIncidentsTab from={debouncedFrom} to={debouncedTo} />
           )}
           {view === "reports" && <ReportsTab />}
         </main>

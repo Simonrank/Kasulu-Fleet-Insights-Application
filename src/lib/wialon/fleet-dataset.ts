@@ -1,8 +1,4 @@
-import {
-  eachDayOfInterval,
-  endOfDay,
-  startOfDay,
-} from "date-fns";
+import { startOfDay } from "date-fns";
 import { db } from "@/lib/db";
 import { units } from "@/lib/db/schema";
 import { wialonConfig } from "@/lib/config/env";
@@ -11,13 +7,21 @@ import {
   parseWialonFleetReportRow,
   parseWialonSpeedingRow,
   parseWialonUnitLatestRow,
+  parseWialonViolationRow,
   wialonRowToStrings,
   type ParsedSpeedingRow,
+  type ParsedWialonViolationRow,
 } from "@/lib/wialon/parse-report";
 import type { ParsedUnitLatestRow } from "@/lib/wialon/parse-report";
 import type { WialonReportTable } from "@/lib/wialon/report-types";
 import type { ParsedKasuluFleetRow } from "@/lib/google-sheets/parse";
 import type { FleetDataset } from "@/lib/google-sheets/fleet-dataset";
+import {
+  clampDarDays,
+  darDayToDate,
+  wialonUnixDayInterval,
+  type DarCalendarDay,
+} from "@/lib/wialon/day-interval";
 
 const CACHE_TTL_MS = 5 * 60_000;
 const SKIP_TABLE_LABELS = new Set(["fuel"]);
@@ -34,14 +38,6 @@ function rangeKey(from: Date, to: Date): string {
   return `${startOfDay(from).toISOString()}|${startOfDay(to).toISOString()}`;
 }
 
-function dayInterval(reportDate: Date): { from: number; to: number } {
-  const start = startOfDay(reportDate);
-  const end = endOfDay(reportDate);
-  return {
-    from: Math.floor(start.getTime() / 1000),
-    to: Math.floor(end.getTime() / 1000),
-  };
-}
 
 function normalizeHeader(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "_");
@@ -112,6 +108,33 @@ function pickSpeedingsTable(
   );
 }
 
+function pickViolationsTable(
+  tables: WialonReportTable[]
+): WialonReportTable | null {
+  return (
+    tables.find((table) => {
+      const label = (table.label ?? table.name ?? "").toLowerCase();
+      return label.includes("violation") && !label.includes("speeding");
+    }) ?? null
+  );
+}
+
+async function fetchViolationsFromTables(
+  client: WialonClient,
+  tables: WialonReportTable[]
+): Promise<ParsedWialonViolationRow[]> {
+  const table = pickViolationsTable(tables);
+  if (!table) return [];
+
+  const tableIndex = tables.indexOf(table);
+  const rawRows = await client.fetchTableRows(tableIndex, table);
+  const headers = table.header ?? [];
+
+  return rawRows
+    .map((row) => parseWialonViolationRow(headers, wialonRowToStrings(row)))
+    .filter((row): row is ParsedWialonViolationRow => row != null);
+}
+
 async function fetchSpeedingsFromTables(
   client: WialonClient,
   tables: WialonReportTable[],
@@ -133,13 +156,14 @@ async function fetchSpeedingsFromTables(
 
 async function fetchDayReport(
   client: WialonClient,
-  reportDate: Date,
+  calendarDay: DarCalendarDay,
   groupId: number
 ): Promise<{
   rows: ParsedKasuluFleetRow[];
   tables: WialonReportTable[];
 }> {
-  const { from, to } = dayInterval(reportDate);
+  const reportDate = darDayToDate(calendarDay);
+  const { from, to } = wialonUnixDayInterval(calendarDay);
   const result = await client.runGroupReport(from, to, groupId);
   const tables = result.reportResult?.tables ?? [];
   const table = pickFleetTable(tables);
@@ -177,34 +201,24 @@ async function fetchUnitLatestFromTables(
     .filter((row): row is ParsedUnitLatestRow => row != null);
 }
 
-function clampReportDays(from: Date, to: Date): Date[] {
-  const maxDays = wialonConfig.reportMaxDays;
-  const days = eachDayOfInterval({
-    start: startOfDay(from),
-    end: startOfDay(to),
-  });
-
-  if (days.length <= maxDays) return days;
-
-  return days.slice(days.length - maxDays);
-}
 
 async function loadFromWialon(from: Date, to: Date): Promise<FleetDataset> {
   const client = createWialonClient();
   const groupId = Number(wialonConfig.reportGroupId);
 
   if (!client) {
-    throw new Error("Wialon is not configured");
+    throw new Error("Live telematics is not configured");
   }
   if (!groupId || !wialonConfig.reportResourceId || !wialonConfig.reportTemplateId) {
     throw new Error(
-      "Wialon report IDs missing. Set WIALON_REPORT_RESOURCE_ID, WIALON_REPORT_TEMPLATE_ID, and WIALON_REPORT_GROUP_ID."
+      "Telematics report IDs missing. Set WIALON_REPORT_RESOURCE_ID, WIALON_REPORT_TEMPLATE_ID, and WIALON_REPORT_GROUP_ID."
     );
   }
 
-  const days = clampReportDays(from, to);
+  const days = clampDarDays(from, to, wialonConfig.reportMaxDays);
   const rows: ParsedKasuluFleetRow[] = [];
   const speedViolations: ParsedSpeedingRow[] = [];
+  const wialonViolations: ParsedWialonViolationRow[] = [];
   let unitLatestSnapshots: ParsedUnitLatestRow[] = [];
 
   try {
@@ -212,10 +226,14 @@ async function loadFromWialon(from: Date, to: Date): Promise<FleetDataset> {
 
     for (let i = 0; i < days.length; i++) {
       const day = days[i];
+      const reportDate = darDayToDate(day);
       const report = await fetchDayReport(client, day, groupId);
       rows.push(...report.rows);
       speedViolations.push(
-        ...(await fetchSpeedingsFromTables(client, report.tables, day))
+        ...(await fetchSpeedingsFromTables(client, report.tables, reportDate))
+      );
+      wialonViolations.push(
+        ...(await fetchViolationsFromTables(client, report.tables))
       );
 
       if (i === days.length - 1) {
@@ -237,6 +255,7 @@ async function loadFromWialon(from: Date, to: Date): Promise<FleetDataset> {
     fetchedAt: Date.now(),
     unitLatestSnapshots,
     speedViolations,
+    wialonViolations,
   };
 }
 

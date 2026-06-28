@@ -481,16 +481,24 @@ export async function getUtilization(
   from: Date,
   to: Date
 ): Promise<UtilizationSummary> {
-  const kpis = await getKpiSummary(from, to);
+  const { isGoogleSheetsConfigured } = await import("@/lib/config/env");
+  if (isGoogleSheetsConfigured()) {
+    const { getSheetUtilization } = await import(
+      "@/lib/google-sheets/utilization"
+    );
+    return getSheetUtilization(from, to);
+  }
 
   const rows = await db
     .select({
       unitId: units.id,
       unitName: units.name,
       driverName: units.driverName,
+      distanceKm: sum(dailyUnitMetrics.distanceKm),
       engineHours: sum(dailyUnitMetrics.engineHours),
       productiveHours: sum(dailyUnitMetrics.productiveHours),
       idleHours: sum(dailyUnitMetrics.idleHours),
+      fuelConsumedLiters: sum(dailyUnitMetrics.fuelConsumedLiters),
     })
     .from(dailyUnitMetrics)
     .innerJoin(units, eq(dailyUnitMetrics.unitId, units.id))
@@ -503,14 +511,9 @@ export async function getUtilization(
     .groupBy(units.id, units.name, units.driverName)
     .orderBy(units.name);
 
-  const productiveHours = rows.reduce(
-    (s, r) => s + Number(r.productiveHours ?? 0),
-    0
-  );
-  const idleHours = rows.reduce((s, r) => s + Number(r.idleHours ?? 0), 0);
-
   const byUnit = rows
     .map((r) => {
+      const distanceKm = Number(r.distanceKm ?? 0);
       const engineHours = Number(r.engineHours ?? 0);
       const productive = Number(r.productiveHours ?? 0);
       const idle = Number(r.idleHours ?? 0);
@@ -518,24 +521,58 @@ export async function getUtilization(
         unitId: r.unitId,
         unitName: r.unitName,
         driverName: r.driverName,
+        distanceKm,
         engineHours,
         productiveHours: productive,
         idleHours: idle,
-        utilizationPercent:
-          engineHours > 0 ? (productive / engineHours) * 100 : 0,
+        fuelConsumedLiters: Number(r.fuelConsumedLiters ?? 0),
+        violationCount: 0,
+        kmPerEngineHour: engineHours > 0 ? distanceKm / engineHours : 0,
       };
     })
-    .sort((a, b) => b.utilizationPercent - a.utilizationPercent);
+    .sort((a, b) => b.distanceKm - a.distanceKm);
+
+  const totalDistanceKm = byUnit.reduce((s, u) => s + u.distanceKm, 0);
+  const totalEngineHours = byUnit.reduce((s, u) => s + u.engineHours, 0);
+  const totalProductiveHours = byUnit.reduce(
+    (s, u) => s + u.productiveHours,
+    0
+  );
+  const totalIdleHours = byUnit.reduce((s, u) => s + u.idleHours, 0);
+
+  const bucketLabels = [
+    "0–100 km",
+    "101–500 km",
+    "501–1000 km",
+    "1001–2000 km",
+    "2000+ km",
+  ] as const;
+  const bucketRanges = [
+    [0, 100],
+    [101, 500],
+    [501, 1000],
+    [1001, 2000],
+    [2001, Infinity],
+  ] as const;
+  const distanceBuckets = bucketLabels.map((label, i) => ({
+    label,
+    count: byUnit.filter((u) => {
+      const [min, max] = bucketRanges[i];
+      return u.distanceKm >= min && u.distanceKm <= max;
+    }).length,
+  }));
 
   return {
     fleet: {
-      utilizationPercent: kpis.utilizationPercent,
-      targetPercent: KPI_TARGETS.utilizationPercent ?? 0,
-      engineHours: kpis.totalEngineHours,
-      productiveHours,
-      idleHours,
+      totalDistanceKm,
+      totalEngineHours,
+      totalProductiveHours,
+      totalIdleHours,
+      avgKmPerEngineHour:
+        totalEngineHours > 0 ? totalDistanceKm / totalEngineHours : 0,
     },
     byUnit,
+    distanceBuckets,
     period: { from: from.toISOString(), to: to.toISOString() },
   };
 }
