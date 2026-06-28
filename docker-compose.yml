@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kasulu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kasulu
+      POSTGRES_PASSWORD: kasulu_dev
+      POSTGRES_DB: kasulu_fleet
+    ports:
+      - "5432:5432"
+    volumes:
+      - kasulu_pg_data:/var/lib/postgresql/data
+
+volumes:
+  kasulu_pg_data:
