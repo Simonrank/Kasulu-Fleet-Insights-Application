@@ -5,20 +5,20 @@ import {
   listAppUsers,
   updateAppUser,
 } from "@/lib/auth/users";
-import { requireUserManager } from "@/lib/auth/session";
+import { requireSuperAdmin } from "@/lib/auth/session";
 import { defaultPermissionsForRole } from "@/lib/auth/permissions";
 
 const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1),
   password: z.string().min(8),
-  role: z.enum(["admin", "operator", "viewer"]),
+  role: z.enum(["viewer"]),
   permissions: z.array(z.string()).optional(),
 });
 
 export async function GET() {
   try {
-    await requireUserManager();
+    await requireSuperAdmin();
     const users = await listAppUsers();
     return NextResponse.json({ users });
   } catch (error) {
@@ -32,7 +32,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireUserManager();
+    await requireSuperAdmin();
     const body = createUserSchema.parse(await request.json());
     const user = await createAppUser({
       email: body.email,
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    await requireUserManager();
+    await requireSuperAdmin();
     const body = z
       .object({
         id: z.string().uuid(),

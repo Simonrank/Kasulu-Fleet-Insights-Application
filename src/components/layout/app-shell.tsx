@@ -13,7 +13,6 @@ import { Sidebar, type NavView } from "@/components/layout/sidebar";
 import { accessibleTabs } from "@/lib/auth/permissions";
 import {
   APP_TAB_IDS,
-  USER_MANAGEMENT_TAB,
   type NavTabId,
   type SessionUser,
 } from "@/lib/auth/types";
@@ -222,7 +221,7 @@ export function AppShell() {
     }
 
     if (status === "loading") {
-      return [...APP_TAB_IDS, USER_MANAGEMENT_TAB];
+      return [...APP_TAB_IDS];
     }
 
     return [...APP_TAB_IDS];

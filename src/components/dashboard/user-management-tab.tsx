@@ -2,25 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, UserPlus } from "lucide-react";
-import {
-  APP_TAB_IDS,
-  CREATE_ROLE_OPTIONS,
-  ROLE_LABELS,
-  TAB_LABELS,
-  type AppTabId,
-} from "@/lib/auth/types";
-import { defaultPermissionsForRole } from "@/lib/auth/permissions";
+import { CREATE_ROLE_OPTIONS, ROLE_LABELS } from "@/lib/auth/types";
 import type { PublicAppUser } from "@/lib/auth/users";
-import type { UserRole } from "@/lib/db/schema";
-
-type CreateRole = (typeof CREATE_ROLE_OPTIONS)[number]["value"];
 
 type CreateForm = {
   email: string;
   name: string;
   password: string;
-  role: CreateRole;
-  permissions: AppTabId[];
+  role: "viewer";
 };
 
 const EMPTY_FORM: CreateForm = {
@@ -28,7 +17,6 @@ const EMPTY_FORM: CreateForm = {
   name: "",
   password: "",
   role: "viewer",
-  permissions: defaultPermissionsForRole("viewer") as AppTabId[],
 };
 
 export function UserManagementTab() {
@@ -37,7 +25,6 @@ export function UserManagementTab() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [showAccess, setShowAccess] = useState(false);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -71,23 +58,6 @@ export function UserManagementTab() {
     [users]
   );
 
-  function togglePermission(tab: AppTabId) {
-    setForm((current) => {
-      const permissions = current.permissions.includes(tab)
-        ? current.permissions.filter((item) => item !== tab)
-        : [...current.permissions, tab];
-      return { ...current, permissions };
-    });
-  }
-
-  function handleRoleChange(role: CreateRole) {
-    setForm((current) => ({
-      ...current,
-      role,
-      permissions: defaultPermissionsForRole(role) as AppTabId[],
-    }));
-  }
-
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -107,7 +77,6 @@ export function UserManagementTab() {
         throw new Error(payload.error ?? "Failed to create user");
       }
       setForm(EMPTY_FORM);
-      setShowAccess(false);
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
@@ -208,10 +177,8 @@ export function UserManagementTab() {
             <div className="relative">
               <select
                 value={form.role}
-                onChange={(e) =>
-                  handleRoleChange(e.target.value as CreateRole)
-                }
-                className="dash-date-input h-11 w-full appearance-none rounded-xl px-3 pr-10 text-sm"
+                disabled
+                className="dash-date-input h-11 w-full appearance-none rounded-xl px-3 pr-10 text-sm opacity-90"
               >
                 {CREATE_ROLE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -222,41 +189,6 @@ export function UserManagementTab() {
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setShowAccess((value) => !value)}
-            className="text-xs font-medium text-teal-700 hover:text-teal-800"
-          >
-            {showAccess ? "Hide custom tab access" : "Customize tab access"}
-          </button>
-
-          {showAccess && (
-            <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Tab access
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {APP_TAB_IDS.map((tab) => {
-                  const active = form.permissions.includes(tab);
-                  return (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => togglePermission(tab)}
-                      className={
-                        active
-                          ? "rounded-full bg-teal-600 px-3 py-1 text-xs font-medium text-white"
-                          : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
-                      }
-                    >
-                      {TAB_LABELS[tab]}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           <button
             type="submit"
@@ -288,7 +220,7 @@ export function UserManagementTab() {
                   <p className="font-medium text-slate-800">{user.name}</p>
                   <p className="text-xs text-slate-500">{user.email}</p>
                   <p className="mt-1 text-xs text-slate-400">
-                    {ROLE_LABELS[user.role]}
+                    {ROLE_LABELS[user.role] ?? user.role}
                     {!user.isActive && " · Disabled"}
                   </p>
                 </div>

@@ -9,56 +9,35 @@ export function isSuperAdmin(role: string): boolean {
   return role === "super_admin";
 }
 
+/** Only the super admin can manage users and see User Management. */
 export function canManageUsers(role: string): boolean {
-  return role === "super_admin" || role === "admin";
+  return isSuperAdmin(role);
 }
 
 export function canAccessTab(
   role: string,
-  permissions: string[],
+  _permissions: string[],
   tab: NavTabId
 ): boolean {
-  if (isSuperAdmin(role)) return true;
-  if (tab === USER_MANAGEMENT_TAB) return false;
-  return permissions.includes(tab);
+  if (tab === USER_MANAGEMENT_TAB) {
+    return isSuperAdmin(role);
+  }
+  return APP_TAB_IDS.includes(tab as (typeof APP_TAB_IDS)[number]);
 }
 
+/** Fleet tabs for every signed-in user; User Management for super admin only. */
 export function accessibleTabs(user: SessionUser): NavTabId[] {
-  const tabs = new Set<NavTabId>();
-
-  if (isSuperAdmin(user.role) || user.role === "admin") {
-    for (const tab of APP_TAB_IDS) tabs.add(tab);
-  } else {
-    for (const tab of APP_TAB_IDS) {
-      if (user.permissions.includes(tab)) tabs.add(tab);
-    }
+  const tabs: NavTabId[] = [...APP_TAB_IDS];
+  if (isSuperAdmin(user.role)) {
+    tabs.push(USER_MANAGEMENT_TAB);
   }
-
-  if (
-    canManageUsers(user.role) ||
-    user.permissions.includes(USER_MANAGEMENT_TAB)
-  ) {
-    tabs.add(USER_MANAGEMENT_TAB);
-  }
-
-  return [...tabs];
+  return tabs;
 }
 
+/** Permissions stored on new accounts — fleet tabs only; never user management. */
 export function defaultPermissionsForRole(role: string): string[] {
-  switch (role) {
-    case "super_admin":
-      return [...APP_TAB_IDS, USER_MANAGEMENT_TAB];
-    case "admin":
-      return [...APP_TAB_IDS, USER_MANAGEMENT_TAB];
-    case "operator":
-      return [
-        "dashboard",
-        "utilization",
-        "fuel-thefts",
-        "driver-incidents",
-      ];
-    case "viewer":
-    default:
-      return ["dashboard", "reports"];
+  if (role === "super_admin") {
+    return [...APP_TAB_IDS, USER_MANAGEMENT_TAB];
   }
+  return [...APP_TAB_IDS];
 }
