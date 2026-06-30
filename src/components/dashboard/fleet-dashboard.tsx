@@ -71,7 +71,7 @@ function DashboardSkeleton({ liveConnectivity }: { liveConnectivity?: React.Reac
   return (
     <div className="space-y-8">
       <div className="dash-metrics-grid">
-        {Array.from({ length: 8 }).map((_, i) => (
+        {Array.from({ length: 9 }).map((_, i) => (
           <div
             key={i}
             className="h-[8.75rem] animate-pulse rounded-2xl border border-slate-200/80 bg-white shadow-sm"
@@ -541,6 +541,24 @@ function DashboardContent({ from, to }: Props) {
             tone="accent"
           />
           <MetricCard
+            title="Consumption (Ltrs/Hr)"
+            value={`${formatNumber(kpiMetrics.consumptionLitersPerHour, 2)} L/hr`}
+            detail="Fleet average burn rate"
+            tone="accent"
+          />
+          <MetricCard
+            title="Distance covered"
+            value={`${formatNumber(kpiMetrics.totalDistanceKm, 0)} km`}
+            detail="Aggregate fleet mileage"
+            tone="neutral"
+          />
+          <MetricCard
+            title="Total fuel consumed"
+            value={`${formatNumber(kpiMetrics.totalFuelConsumedLiters, 0)} L`}
+            detail="Aggregate litres used in period"
+            tone="accent"
+          />
+          <MetricCard
             title="Total fuel stolen"
             value={`${formatNumber(totalTheftLiters, 1)} L`}
             detail={`${theftEvents} ${theftType === "all" ? "recorded" : theftType === "direct" ? "direct" : "return pipe"} events in period`}
@@ -551,18 +569,6 @@ function DashboardContent({ from, to }: Props) {
             value={`${formatNumber(kpiMetrics.consumptionKmPerLiter, 2)} km/L`}
             detail="Fleet average fuel efficiency"
             tone="accent"
-          />
-          <MetricCard
-            title="Consumption (Ltrs/Hr)"
-            value={`${formatNumber(kpiMetrics.consumptionLitersPerHour, 2)} L/hr`}
-            detail={`${formatNumber(kpiMetrics.totalEngineHours, 0)} engine hours in period`}
-            tone="accent"
-          />
-          <MetricCard
-            title="Distance covered"
-            value={`${formatNumber(kpiMetrics.totalDistanceKm, 0)} km`}
-            detail="Aggregate fleet mileage"
-            tone="neutral"
           />
           <MetricCard
             title="Direct theft"

@@ -17,6 +17,7 @@ const VALID_TYPES = new Set<ExportReportType>([
   "fuel",
   "violations",
   "locations",
+  "utilization",
 ]);
 
 const VALID_FORMATS = new Set<ExportFormat>(["csv", "xlsx", "pdf"]);
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 
     if (!type || !VALID_TYPES.has(type)) {
       return NextResponse.json(
-        { error: "type must be fuel, violations, or locations" },
+        { error: "type must be fuel, violations, locations, or utilization" },
         { status: 400 }
       );
     }
@@ -45,7 +46,10 @@ export async function GET(request: Request) {
 
     if (type !== "locations" && (!fromParam || !toParam)) {
       return NextResponse.json(
-        { error: "from and to are required for fuel and violations exports" },
+        {
+          error:
+            "from and to are required for fuel, violations, and utilization exports",
+        },
         { status: 400 }
       );
     }

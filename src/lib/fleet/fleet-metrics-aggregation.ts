@@ -5,6 +5,7 @@ export type FuelFleetAggregate = {
   distanceKm: number;
   engineHours: number;
   fuelConsumedLiters: number;
+  fuelTopUpLiters: number;
   consumptionKmPerLiter: number;
   consumptionLitersPerHour: number;
   directTheftLiters: number;
@@ -39,6 +40,10 @@ export function aggregateFuelFleetRows(
     (sum, row) => sum + row.fuelConsumedLiters,
     0
   );
+  const fuelTopUpLiters = rows.reduce(
+    (sum, row) => sum + row.fuelTopUpLiters,
+    0
+  );
 
   const kmPerLiterSamples = rows
     .map((row) => row.kmPerLiter)
@@ -65,6 +70,7 @@ export function aggregateFuelFleetRows(
     distanceKm: totalDistanceKm,
     engineHours: totalEngineHours,
     fuelConsumedLiters,
+    fuelTopUpLiters,
     consumptionKmPerLiter:
       averageSheetMetric(kmPerLiterSamples) ||
       (fuelConsumedLiters > 0 ? totalDistanceKm / fuelConsumedLiters : 0),

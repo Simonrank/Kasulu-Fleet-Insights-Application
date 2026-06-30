@@ -13,7 +13,7 @@ export function rowsToCsv(rows: (string | number | null | undefined)[][]): strin
 }
 
 export type ExportFormat = "csv" | "xlsx" | "pdf";
-export type ExportReportType = "fuel" | "violations" | "locations";
+export type ExportReportType = "fuel" | "violations" | "locations" | "utilization";
 
 export async function fetchAndDownloadReport(
   type: ExportReportType,

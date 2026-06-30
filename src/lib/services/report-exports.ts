@@ -1,6 +1,6 @@
 import { format } from "date-fns";
 import { rowsToCsv } from "@/lib/export/csv";
-import { getFuelThefts } from "@/lib/services/analytics";
+import { getFuelThefts, getUtilization } from "@/lib/services/analytics";
 import { getFleetViolations } from "@/lib/services/violations";
 import { getLiveUnitLocations } from "@/lib/telematics/locations";
 import { formatDuration } from "@/lib/fleet/theft-filters";
@@ -28,7 +28,7 @@ function periodHeader(
   ];
 }
 
-export type ExportReportType = "fuel" | "violations" | "locations";
+export type ExportReportType = "fuel" | "violations" | "locations" | "utilization";
 
 export type ReportRow = string | number | null | undefined;
 export type ReportRows = ReportRow[][];
@@ -45,6 +45,8 @@ export async function getReportRows(
       return buildViolationsReportRows(from, to);
     case "locations":
       return buildVehicleLocationsRows();
+    case "utilization":
+      return buildUtilizationReportRows(from, to);
   }
 }
 
@@ -73,6 +75,7 @@ async function buildFuelReportRows(from: Date, to: Date): Promise<ReportRows> {
       "Category",
       "Distance (km)",
       "Fuel consumed (L)",
+      "Fuel top ups (L)",
       "Engine hrs",
       "Km/L",
       "L/hr",
@@ -89,6 +92,7 @@ async function buildFuelReportRows(from: Date, to: Date): Promise<ReportRows> {
       row.category,
       row.distanceKm.toFixed(1),
       row.fuelConsumedLiters.toFixed(1),
+      row.fuelTopUpLiters.toFixed(1),
       row.engineHours.toFixed(1),
       row.kmPerLiter.toFixed(2),
       row.litersPerHour.toFixed(2),
@@ -197,6 +201,68 @@ async function buildViolationsReportRows(
   return rows;
 }
 
+async function buildUtilizationReportRows(
+  from: Date,
+  to: Date
+): Promise<ReportRows> {
+  const data = await getUtilization(from, to);
+  const { fleet } = data;
+  const fleetUtilizationPercent =
+    fleet.totalEngineHours > 0
+      ? (fleet.totalProductiveHours / fleet.totalEngineHours) * 100
+      : 0;
+  const totalViolations = data.byUnit.reduce(
+    (sum, unit) => sum + unit.violationCount,
+    0
+  );
+  const totalFuel = data.byUnit.reduce(
+    (sum, unit) => sum + unit.fuelConsumedLiters,
+    0
+  );
+
+  const rows: ReportRows = [
+    ...periodHeader("Utilization Report", from, to),
+    ["Fleet Summary"],
+    ["Total distance (km)", fleet.totalDistanceKm.toFixed(1)],
+    ["Total engine hours", fleet.totalEngineHours.toFixed(1)],
+    ["Productive hours", fleet.totalProductiveHours.toFixed(1)],
+    ["Idle hours", fleet.totalIdleHours.toFixed(1)],
+    ["Avg km / engine hr", fleet.avgKmPerEngineHour.toFixed(1)],
+    ["Fleet utilization (%)", fleetUtilizationPercent.toFixed(1)],
+    ["Total fuel consumed (L)", totalFuel.toFixed(0)],
+    ["Total violations", totalViolations],
+    ["Units", data.byUnit.length],
+    [],
+    [
+      "#",
+      "Vehicle",
+      "Category",
+      "Distance (km)",
+      "Engine hrs",
+      "Km / hr",
+      "Idle hrs",
+      "Fuel consumed (L)",
+      "Violations",
+    ],
+  ];
+
+  data.byUnit.forEach((unit, index) => {
+    rows.push([
+      index + 1,
+      unit.unitName,
+      unit.category ?? "",
+      unit.distanceKm.toFixed(1),
+      unit.engineHours.toFixed(1),
+      unit.kmPerEngineHour.toFixed(1),
+      unit.idleHours.toFixed(1),
+      unit.fuelConsumedLiters.toFixed(0),
+      unit.violationCount,
+    ]);
+  });
+
+  return rows;
+}
+
 async function buildVehicleLocationsRows(): Promise<ReportRows> {
   const rows = await getLiveUnitLocations();
 
@@ -230,6 +296,7 @@ const REPORT_TITLES: Record<ExportReportType, string> = {
   fuel: "Fuel Report",
   violations: "Violations Report",
   locations: "Current Asset Location",
+  utilization: "Utilization Report",
 };
 
 export function reportTitle(type: ExportReportType): string {
@@ -251,5 +318,7 @@ export function exportFilename(
       return `kasulu-violations-report_${range}_${stamp}.${ext}`;
     case "locations":
       return `kasulu-current-asset-location_${stamp}.${ext}`;
+    case "utilization":
+      return `kasulu-utilization-report_${range}_${stamp}.${ext}`;
   }
 }

@@ -7,6 +7,7 @@ import { filterFleetTableByCategory } from "@/lib/fleet/category-kpis";
 import type { VehicleTypeFilter } from "@/lib/fleet/theft-filters";
 import { cn, formatNumber } from "@/lib/utils";
 import type { FuelFleetRow, FuelTheftsResponse, TheftFilter } from "@/lib/types";
+
 type Props = {
   title?: string;
   rows: FuelFleetRow[];
@@ -15,6 +16,7 @@ type Props = {
   footerTotals?: {
     distanceKm: number;
     fuelConsumedLiters: number;
+    fuelTopUpLiters: number;
     directTheftLiters: number;
     returnPipeTheftLiters: number;
     totalTheftLiters: number;
@@ -27,6 +29,10 @@ export function sumFleetTable(rows: FuelFleetRow[]) {
   const distanceKm = rows.reduce((sum, row) => sum + row.distanceKm, 0);
   const fuelConsumedLiters = rows.reduce(
     (sum, row) => sum + row.fuelConsumedLiters,
+    0
+  );
+  const fuelTopUpLiters = rows.reduce(
+    (sum, row) => sum + row.fuelTopUpLiters,
     0
   );
   const engineHours = rows.reduce((sum, row) => sum + row.engineHours, 0);
@@ -46,6 +52,7 @@ export function sumFleetTable(rows: FuelFleetRow[]) {
   return {
     distanceKm,
     fuelConsumedLiters,
+    fuelTopUpLiters,
     directTheftLiters,
     returnPipeTheftLiters,
     totalTheftLiters,
@@ -64,6 +71,7 @@ export function buildFuelSummaryFooter(
     return {
       distanceKm: overview.distanceKm,
       fuelConsumedLiters: overview.fuelConsumedLiters,
+      fuelTopUpLiters: overview.fuelFillings.volumeLiters,
       directTheftLiters: overview.directTheft.volumeLiters,
       returnPipeTheftLiters: overview.returnPipeTheft.volumeLiters,
       totalTheftLiters: overview.fuelDrains.volumeLiters,
@@ -137,6 +145,9 @@ export function FleetFuelTheftSummaryTable({
             <td className="px-2 py-2.5 text-right tabular-nums md:px-3">
               {formatNumber(footerTotals.fuelConsumedLiters, 0)}
             </td>
+            <td className="px-2 py-2.5 text-right tabular-nums text-[#0d9488] md:px-3">
+              {formatNumber(footerTotals.fuelTopUpLiters, 0)}
+            </td>
             <td className="px-2 py-2.5 text-right tabular-nums text-destructive md:px-3">
               {formatNumber(footerTotals.directTheftLiters, 0)}
             </td>
@@ -196,13 +207,14 @@ export function FleetFuelTheftSummaryTable({
       <div className="overflow-x-auto">
         <table className="w-full table-fixed text-xs md:text-sm">
           <colgroup>
-            <col className="w-[21%]" />
-            <col className="w-[11%]" />
+            <col className="w-[18%]" />
             <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
             <col className="w-[9%]" />
             <col className="w-[9%]" />
           </colgroup>
@@ -215,6 +227,9 @@ export function FleetFuelTheftSummaryTable({
               </th>
               <th className="px-2 py-2 text-right font-semibold md:px-3 md:py-2.5" title="Fuel consumed (L)">
                 Fuel (L)
+              </th>
+              <th className="px-2 py-2 text-right font-semibold md:px-3 md:py-2.5" title="Fuel top ups (L)">
+                Top up (L)
               </th>
               <th className="px-2 py-2 text-right font-semibold md:px-3 md:py-2.5" title="Actual theft (L)">
                 Direct (L)
@@ -256,6 +271,14 @@ export function FleetFuelTheftSummaryTable({
                 <td
                   className={cn(
                     "px-2 py-2 text-right tabular-nums md:px-3",
+                    row.fuelTopUpLiters > 0 && "font-medium text-[#0d9488]"
+                  )}
+                >
+                  {formatNumber(row.fuelTopUpLiters, 0)}
+                </td>
+                <td
+                  className={cn(
+                    "px-2 py-2 text-right tabular-nums md:px-3",
                     row.directTheftLiters > 0 && "font-semibold text-destructive"
                   )}
                 >
@@ -287,7 +310,7 @@ export function FleetFuelTheftSummaryTable({
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">
                   {emptyMessage}
                 </td>
               </tr>

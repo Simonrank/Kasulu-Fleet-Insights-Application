@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { format } from "date-fns";
-import { ArrowLeft, FileSpreadsheet, MapPin, ShieldAlert, Fuel } from "lucide-react";
-import { useDriverIncidents, useFuelThefts, useLiveUnitLocations } from "@/hooks/use-fleet-data";
+import { ArrowLeft, FileSpreadsheet, Gauge, MapPin, ShieldAlert, Fuel } from "lucide-react";
+import { useDriverIncidents, useFuelThefts, useLiveUnitLocations, useUtilization } from "@/hooks/use-fleet-data";
 import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
 import { CurrentAssetLocationTable } from "@/components/dashboard/current-asset-location-table";
 import {
@@ -11,6 +11,10 @@ import {
   filterFuelFleetRows,
   FleetFuelTheftSummaryTable,
 } from "@/components/dashboard/fleet-fuel-theft-summary-table";
+import {
+  filterUtilizationUnits,
+  UtilizationPerUnitTable,
+} from "@/components/dashboard/utilization-per-unit-table";
 import { Button } from "@/components/ui/button";
 import { fetchAndDownloadReport, type ExportFormat, type ExportReportType } from "@/lib/export/csv";
 import { formatNumber } from "@/lib/utils";
@@ -48,6 +52,12 @@ const REPORT_META: Record<
       "Live ControlRoom report — asset, last message, location, and speed.",
     icon: MapPin,
   },
+  utilization: {
+    title: "Utilization report",
+    description:
+      "Per-vehicle distance, engine hours, fuel consumption, and violations for the selected period.",
+    icon: Gauge,
+  },
 };
 
 export function ReportDetailPanel({
@@ -61,6 +71,7 @@ export function ReportDetailPanel({
   const Icon = meta.icon;
 
   const fuelQuery = useFuelThefts(from, to, "all");
+  const utilizationQuery = useUtilization(from, to);
   const incidentsQuery = useDriverIncidents(from, to);
   const liveLocationsQuery = useLiveUnitLocations();
   const {
@@ -77,6 +88,14 @@ export function ReportDetailPanel({
     });
   }, [fuelQuery.data, categoryFilter, unitCategoryById]);
 
+  const filteredUtilizationRows = useMemo(() => {
+    if (!utilizationQuery.data) return [];
+    return filterUtilizationUnits(utilizationQuery.data.byUnit, {
+      categoryFilter,
+      unitCategoryById,
+    });
+  }, [utilizationQuery.data, categoryFilter, unitCategoryById]);
+
   const fuelFooterTotals = useMemo(() => {
     if (!fuelQuery.data) return null;
     return buildFuelSummaryFooter(
@@ -90,10 +109,56 @@ export function ReportDetailPanel({
     type === "fuel"
       ? (fuelQuery.isLoading && !fuelQuery.data) ||
         (fuelQuery.isFetching && !fuelQuery.data)
+      : type === "utilization"
+        ? (utilizationQuery.isLoading && !utilizationQuery.data) ||
+          (utilizationQuery.isFetching && !utilizationQuery.data)
       : type === "violations"
         ? (fuelQuery.isLoading && !fuelQuery.data) ||
           (incidentsQuery.isLoading && !incidentsQuery.data)
         : liveLocationsQuery.isLoading && !liveLocationsQuery.data;
+
+  if (type === "utilization") {
+    return (
+      <div className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <ExportButtons
+            type={type}
+            from={from}
+            to={to}
+            disabled={!utilizationQuery.data}
+          />
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          Period: {periodLabel}
+          {categoryFilterActive ? ` · ${categoryFilter}` : ""}
+        </p>
+
+        {utilizationQuery.isFetching && utilizationQuery.data && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Updating period…
+          </p>
+        )}
+
+        {categoryFilterActive && utilizationQuery.data && (
+          <p className="rounded-lg border border-[#99f6e4]/40 bg-[#f0fdfa]/60 px-3 py-2 text-sm text-[#0f766e]">
+            Showing {filteredUtilizationRows.length} of{" "}
+            {utilizationQuery.data.byUnit.length} units · {categoryFilter}
+          </p>
+        )}
+
+        {isLoading ? (
+          <div className="h-[28rem] animate-pulse rounded-2xl bg-muted" />
+        ) : utilizationQuery.data ? (
+          <UtilizationPerUnitTable rows={filteredUtilizationRows} />
+        ) : null}
+      </div>
+    );
+  }
 
   if (type === "fuel") {
     return (
@@ -393,6 +458,16 @@ export const REPORT_CARDS: {
     cardClass: "bg-violet-50/80 border-violet-100",
     iconWrapClass: "bg-violet-100",
     iconClass: "text-violet-600",
+  },
+  {
+    type: "utilization",
+    title: "Utilization report",
+    description:
+      "Per-vehicle distance, engine hours, fuel consumption, and violations.",
+    icon: Gauge,
+    cardClass: "bg-emerald-50/80 border-emerald-100",
+    iconWrapClass: "bg-emerald-100",
+    iconClass: "text-emerald-600",
   },
   {
     type: "locations",

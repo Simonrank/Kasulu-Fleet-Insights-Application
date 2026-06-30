@@ -20,6 +20,13 @@ type UnitAgg = {
   violationCount: number;
 };
 
+function unitUtilizationPercent(
+  productiveHours: number,
+  engineHours: number
+): number {
+  return engineHours > 0 ? (productiveHours / engineHours) * 100 : 0;
+}
+
 function unitDisplayName(machineId: string): string {
   return machineId.split("—")[0]?.trim() ?? machineId;
 }
@@ -79,6 +86,10 @@ export function buildUtilizationFromDataset(
       fuelConsumedLiters: u.fuelConsumedLiters,
       violationCount: u.violationCount,
       kmPerEngineHour: u.engineHours > 0 ? u.distanceKm / u.engineHours : 0,
+      utilizationPercent: unitUtilizationPercent(
+        u.productiveHours,
+        u.engineHours
+      ),
     }))
     .sort((a, b) => b.distanceKm - a.distanceKm);
 

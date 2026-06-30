@@ -38,7 +38,7 @@ export function ReportsTab({ from, to }: Props) {
       <p className="text-sm text-muted-foreground">
         Report period: {periodLabel}
       </p>
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {REPORT_CARDS.map((card) => (
           <ReportCard
             key={card.type}

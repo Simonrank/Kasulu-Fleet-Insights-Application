@@ -13,11 +13,21 @@ function loadCredentials(): ServiceAccountCredentials | null {
     process.env.GOOGLE_SERVICE_ACCOUNT_JSON ??
     process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (inlineJson) {
+    const trimmed = inlineJson.trim();
     try {
-      const parsed = JSON.parse(inlineJson) as ServiceAccountCredentials;
-      return normalizeCredentials(parsed);
+      const parsed = JSON.parse(trimmed) as ServiceAccountCredentials;
+      const normalized = normalizeCredentials(parsed);
+      if (normalized) return normalized;
     } catch {
-      return null;
+      // Vercel sometimes stores base64-encoded JSON
+      try {
+        const decoded = Buffer.from(trimmed, "base64").toString("utf-8");
+        const parsed = JSON.parse(decoded) as ServiceAccountCredentials;
+        const normalized = normalizeCredentials(parsed);
+        if (normalized) return normalized;
+      } catch {
+        return null;
+      }
     }
   }
 

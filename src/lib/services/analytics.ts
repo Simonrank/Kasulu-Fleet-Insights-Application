@@ -110,6 +110,7 @@ export async function getKpiSummary(from: Date, to: Date): Promise<KpiSummary> {
           : 0,
     totalDistanceKm: distance,
     totalEngineHours: engineHours,
+    totalFuelConsumedLiters: fuelLiters,
     utilizationPercent,
     updatingUnits: updating,
     nonUpdatingUnits: fleetUnits.length - updating,
@@ -268,6 +269,7 @@ export async function getFuelThefts(
       category: fleetCategoryLabel(unit.vehicleCategory, unit.vehicleType),
       distanceKm: metrics.distanceKm,
       fuelConsumedLiters: metrics.fuelConsumedLiters,
+      fuelTopUpLiters: metrics.fuelFilledLiters,
       directTheftLiters: thefts.direct,
       returnPipeTheftLiters: thefts.returnPipe,
       totalTheftLiters: thefts.direct + thefts.returnPipe,
@@ -526,6 +528,8 @@ export async function getUtilization(
         fuelConsumedLiters: Number(r.fuelConsumedLiters ?? 0),
         violationCount: 0,
         kmPerEngineHour: engineHours > 0 ? distanceKm / engineHours : 0,
+        utilizationPercent:
+          engineHours > 0 ? (productive / engineHours) * 100 : 0,
       };
     })
     .sort((a, b) => b.distanceKm - a.distanceKm);

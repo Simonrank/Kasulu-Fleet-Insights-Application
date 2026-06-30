@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useUtilization } from "@/hooks/use-fleet-data";
 import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
 import { useUtilizationViewFilter } from "@/context/utilization-view-filter";
@@ -12,8 +12,9 @@ import {
   VERCEL_SHEETS_HINTS,
 } from "@/components/dashboard/data-load-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { UtilizationPerUnitTable } from "@/components/dashboard/utilization-per-unit-table";
 import { cn, formatNumber } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, Gauge, MapPin, Clock, Timer } from "lucide-react";
+import { Gauge, MapPin, Clock, Timer } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -30,8 +31,6 @@ type Props = {
   to: string;
 };
 
-const PAGE_SIZE = 10;
-
 const CHART = {
   distance: "#38bdf8",
   engine: "#a78bfa",
@@ -41,7 +40,6 @@ const CHART = {
 };
 
 export function UtilizationTab({ from, to }: Props) {
-  const [page, setPage] = useState(0);
   const { view } = useUtilizationViewFilter();
   const { categoryFilter, unitCategoryById, isActive: categoryFilterActive } =
     useFleetCategoryFilter();
@@ -54,10 +52,6 @@ export function UtilizationTab({ from, to }: Props) {
     isFetching,
     isPlaceholderData,
   } = useUtilization(from, to);
-
-  useEffect(() => {
-    setPage(0);
-  }, [view, from, to, categoryFilter]);
 
   const categoryScopedUnits = useMemo(() => {
     if (!data) return [];
@@ -82,17 +76,6 @@ export function UtilizationTab({ from, to }: Props) {
 
     return units;
   }, [data, view, categoryScopedUnits]);
-
-  const pageCount = Math.max(1, Math.ceil(filteredUnits.length / PAGE_SIZE));
-  const pageRows = useMemo(
-    () => filteredUnits.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
-    [filteredUnits, page]
-  );
-
-  useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(filteredUnits.length / PAGE_SIZE) - 1);
-    if (page > maxPage) setPage(maxPage);
-  }, [filteredUnits.length, page]);
 
   const topChartData = useMemo(() => {
     if (!data) return [];
@@ -327,110 +310,16 @@ export function UtilizationTab({ from, to }: Props) {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {view === "underutilized"
-              ? "Underutilized vehicles"
-              : view === "top"
-                ? "Top utilized vehicles"
-                : "Per-unit breakdown"}
-            {" "}({filteredUnits.length})
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Distance and engine hours · {PAGE_SIZE} per page
-          </p>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="pb-3 pr-4 font-semibold w-10">#</th>
-                <th className="pb-3 pr-4 font-semibold">Vehicle</th>
-                <th className="pb-3 pr-4 font-semibold">Category</th>
-                <th className="pb-3 pr-4 font-semibold">Distance</th>
-                <th className="pb-3 pr-4 font-semibold">Engine hrs</th>
-                <th className="pb-3 pr-4 font-semibold">Km / hr</th>
-                <th className="pb-3 pr-4 font-semibold">Idle hrs</th>
-                <th className="pb-3 pr-4 font-semibold">Fuel consumed</th>
-                <th className="pb-3 font-semibold">Violations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageRows.map((u, index) => (
-                <tr key={u.unitId} className="border-b border-border/60">
-                  <td className="py-2.5 pr-4 tabular-nums text-muted-foreground">
-                    {page * PAGE_SIZE + index + 1}
-                  </td>
-                  <td className="py-2.5 pr-4 font-medium">{u.unitName}</td>
-                  <td className="py-2.5 pr-4 text-muted-foreground">
-                    {u.category ?? "—"}
-                  </td>
-                  <td className="py-2.5 pr-4 font-semibold text-sky-700">
-                    {formatNumber(u.distanceKm, 1)} km
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    {formatNumber(u.engineHours, 1)} hrs
-                  </td>
-                  <td className="py-2.5 pr-4 tabular-nums">
-                    {formatNumber(u.kmPerEngineHour, 1)}
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    {formatNumber(u.idleHours, 1)} hrs
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    {formatNumber(u.fuelConsumedLiters, 0)} L
-                  </td>
-                  <td className="py-2.5 tabular-nums">{u.violationCount}</td>
-                </tr>
-              ))}
-              {pageRows.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="py-8 text-center text-muted-foreground"
-                  >
-                    No units match your filters
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
-          {filteredUnits.length > 0 && (
-            <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-4">
-              <p className="text-xs text-muted-foreground">
-                Showing {page * PAGE_SIZE + 1}–
-                {Math.min((page + 1) * PAGE_SIZE, filteredUnits.length)} of{" "}
-                {filteredUnits.length}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Previous
-                </button>
-                <span className="min-w-[4.5rem] text-center text-xs tabular-nums text-muted-foreground">
-                  {page + 1} / {pageCount}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                  disabled={page >= pageCount - 1}
-                  className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <UtilizationPerUnitTable
+        title={
+          view === "underutilized"
+            ? "Underutilized vehicles"
+            : view === "top"
+              ? "Top utilized vehicles"
+              : "Per-unit breakdown"
+        }
+        rows={filteredUnits}
+      />
     </div>
   );
 }

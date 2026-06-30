@@ -246,6 +246,7 @@ export function buildDashboardFromSheet(
           : 0,
     totalDistanceKm,
     totalEngineHours,
+    totalFuelConsumedLiters: totalFuelLiters,
     utilizationPercent,
     updatingUnits,
     nonUpdatingUnits: totalUnits - updatingUnits,
@@ -268,6 +269,7 @@ export function buildDashboardFromSheet(
       category: u.categoryLabel ?? "—",
       distanceKm: u.distanceKm,
       fuelConsumedLiters: u.fuelConsumedLiters,
+      fuelTopUpLiters: u.fuelFilledLiters,
       directTheftLiters: u.directTheftLiters + u.untypedTheftLiters,
       returnPipeTheftLiters: u.returnPipeTheftLiters,
       totalTheftLiters:

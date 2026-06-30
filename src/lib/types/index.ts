@@ -63,6 +63,7 @@ export type KpiSummary = {
   consumptionLitersPerHour: number;
   totalDistanceKm: number;
   totalEngineHours: number;
+  totalFuelConsumedLiters: number;
   utilizationPercent: number;
   updatingUnits: number;
   nonUpdatingUnits: number;
@@ -91,6 +92,7 @@ export type UtilizationUnitRow = {
   fuelConsumedLiters: number;
   violationCount: number;
   kmPerEngineHour: number;
+  utilizationPercent: number;
 };
 
 export type UtilizationSummary = {
@@ -204,6 +206,7 @@ export type FuelFleetRow = {
   category: string;
   distanceKm: number;
   fuelConsumedLiters: number;
+  fuelTopUpLiters: number;
   directTheftLiters: number;
   returnPipeTheftLiters: number;
   totalTheftLiters: number;
