@@ -27,11 +27,21 @@ export const ROLE_LABELS: Record<string, string> = {
   viewer: "Viewer",
 };
 
+/** Labels shown in the create-account role dropdown */
+export const CREATE_ROLE_OPTIONS: {
+  value: "admin" | "operator" | "viewer";
+  label: string;
+}[] = [
+  { value: "viewer", label: "User — dashboard access" },
+  { value: "operator", label: "Operator — fleet operations" },
+  { value: "admin", label: "Admin — all dashboard tabs" },
+];
+
 export const TAB_LABELS: Record<NavTabId, string> = {
   dashboard: "Dashboard",
   utilization: "Utilization",
   "fuel-thefts": "Fuel Thefts",
   "driver-incidents": "Driver Incidents",
   reports: "Reports",
-  users: "User management",
+  users: "User Management",
 };

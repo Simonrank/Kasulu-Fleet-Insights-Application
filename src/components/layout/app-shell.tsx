@@ -11,7 +11,12 @@ import { TheftTypeFilterBar } from "@/components/layout/theft-type-filter-bar";
 import { UtilizationViewFilterBar } from "@/components/layout/utilization-view-filter-bar";
 import { Sidebar, type NavView } from "@/components/layout/sidebar";
 import { accessibleTabs } from "@/lib/auth/permissions";
-import { APP_TAB_IDS, type NavTabId } from "@/lib/auth/types";
+import {
+  APP_TAB_IDS,
+  USER_MANAGEMENT_TAB,
+  type NavTabId,
+  type SessionUser,
+} from "@/lib/auth/types";
 import { FleetCategoryFilterProvider } from "@/context/fleet-category-filter";
 import { TheftFilterProvider } from "@/context/theft-filter";
 import { UtilizationViewFilterProvider } from "@/context/utilization-view-filter";
@@ -119,6 +124,8 @@ const UserManagementTab = lazyTab(
 );
 
 function tabExtraFilters(view: NavView) {
+  if (view === "users") return null;
+
   return (
     <>
       <CategoryFilterBar compact />
@@ -203,12 +210,19 @@ export function AppShell() {
   }, []);
 
   const allowedViews = useMemo<NavTabId[]>(() => {
-    if (session?.user?.role) {
-      return accessibleTabs(session.user);
+    if (session?.user) {
+      const user: SessionUser = {
+        id: session.user.id,
+        email: session.user.email ?? "",
+        name: session.user.name ?? "",
+        role: session.user.role ?? "viewer",
+        permissions: session.user.permissions ?? [],
+      };
+      return accessibleTabs(user);
     }
 
     if (status === "loading") {
-      return [...APP_TAB_IDS];
+      return [...APP_TAB_IDS, USER_MANAGEMENT_TAB];
     }
 
     return [...APP_TAB_IDS];

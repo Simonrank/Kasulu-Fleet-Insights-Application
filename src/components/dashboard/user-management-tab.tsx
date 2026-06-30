@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { ChevronDown, UserPlus } from "lucide-react";
 import {
   APP_TAB_IDS,
+  CREATE_ROLE_OPTIONS,
   ROLE_LABELS,
   TAB_LABELS,
   type AppTabId,
@@ -12,17 +13,13 @@ import { defaultPermissionsForRole } from "@/lib/auth/permissions";
 import type { PublicAppUser } from "@/lib/auth/users";
 import type { UserRole } from "@/lib/db/schema";
 
-const ROLE_OPTIONS: UserRole[] = [
-  "admin",
-  "operator",
-  "viewer",
-];
+type CreateRole = (typeof CREATE_ROLE_OPTIONS)[number]["value"];
 
 type CreateForm = {
   email: string;
   name: string;
   password: string;
-  role: UserRole;
+  role: CreateRole;
   permissions: AppTabId[];
 };
 
@@ -40,6 +37,7 @@ export function UserManagementTab() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [showAccess, setShowAccess] = useState(false);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -82,7 +80,7 @@ export function UserManagementTab() {
     });
   }
 
-  function handleRoleChange(role: UserRole) {
+  function handleRoleChange(role: CreateRole) {
     setForm((current) => ({
       ...current,
       role,
@@ -109,6 +107,7 @@ export function UserManagementTab() {
         throw new Error(payload.error ?? "Failed to create user");
       }
       setForm(EMPTY_FORM);
+      setShowAccess(false);
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
@@ -139,38 +138,31 @@ export function UserManagementTab() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-dash-foreground">
-          User management
-        </h2>
-        <p className="mt-1 text-sm text-dash-muted">
-          Create accounts and grant access to dashboard tabs.
-        </p>
-      </div>
-
+    <div className="mx-auto max-w-2xl space-y-8 py-2">
       {error && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </p>
       )}
 
-      <div className="dash-panel">
-        <h3 className="text-base font-semibold text-dash-foreground">Create account</h3>
-        <form onSubmit={handleCreate} className="mt-4 grid gap-4 lg:grid-cols-2">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Full name
-            </label>
-            <input
-              required
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="dash-date-input h-9 w-full rounded-lg px-3 text-sm"
-            />
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm md:p-8">
+        <div className="mb-6 flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+            <UserPlus className="h-5 w-5" strokeWidth={2.25} />
+          </span>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">
+              Create account
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              New users sign in with email and password on the login page.
+            </p>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        </div>
+
+        <form onSubmit={handleCreate} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               Email
             </label>
             <input
@@ -178,12 +170,25 @@ export function UserManagementTab() {
               required
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="dash-date-input h-9 w-full rounded-lg px-3 text-sm"
+              className="dash-date-input h-11 w-full rounded-xl px-3 text-sm"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Temporary password
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Full name
+            </label>
+            <input
+              required
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="dash-date-input h-11 w-full rounded-xl px-3 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              Password
             </label>
             <input
               type="password"
@@ -191,120 +196,114 @@ export function UserManagementTab() {
               minLength={8}
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="dash-date-input h-9 w-full rounded-lg px-3 text-sm"
+              className="dash-date-input h-11 w-full rounded-xl px-3 text-sm"
             />
+            <p className="text-xs text-slate-400">Minimum 8 characters</p>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               Role
             </label>
-            <select
-              value={form.role}
-              onChange={(e) => handleRoleChange(e.target.value as UserRole)}
-              className="dash-date-input h-9 w-full rounded-lg px-3 text-sm"
-            >
-              {ROLE_OPTIONS.map((role) => (
-                <option key={role} value={role}>
-                  {ROLE_LABELS[role]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="lg:col-span-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Tab access
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {APP_TAB_IDS.map((tab) => {
-                const active = form.permissions.includes(tab);
-                return (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => togglePermission(tab)}
-                    className={
-                      active
-                        ? "rounded-full bg-[#0d9488] px-3 py-1 text-xs font-medium text-white"
-                        : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
-                    }
-                  >
-                    {TAB_LABELS[tab]}
-                  </button>
-                );
-              })}
+            <div className="relative">
+              <select
+                value={form.role}
+                onChange={(e) =>
+                  handleRoleChange(e.target.value as CreateRole)
+                }
+                className="dash-date-input h-11 w-full appearance-none rounded-xl px-3 pr-10 text-sm"
+              >
+                {CREATE_ROLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             </div>
           </div>
-          <div className="lg:col-span-2">
-            <Button type="submit" disabled={saving}>
-              {saving ? "Creating…" : "Create user"}
-            </Button>
-          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowAccess((value) => !value)}
+            className="text-xs font-medium text-teal-700 hover:text-teal-800"
+          >
+            {showAccess ? "Hide custom tab access" : "Customize tab access"}
+          </button>
+
+          {showAccess && (
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Tab access
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {APP_TAB_IDS.map((tab) => {
+                  const active = form.permissions.includes(tab);
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => togglePermission(tab)}
+                      className={
+                        active
+                          ? "rounded-full bg-teal-600 px-3 py-1 text-xs font-medium text-white"
+                          : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
+                      }
+                    >
+                      {TAB_LABELS[tab]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-300 text-sm font-semibold text-slate-900 transition-colors hover:bg-emerald-400 disabled:opacity-60"
+          >
+            <UserPlus className="h-4 w-4" strokeWidth={2.25} />
+            {saving ? "Creating…" : "Create account"}
+          </button>
         </form>
       </div>
 
-      <div className="dash-panel overflow-x-auto">
-        <h3 className="text-base font-semibold text-dash-foreground">
+      <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+        <h3 className="text-base font-semibold text-slate-900">
           Existing users
         </h3>
         {loading ? (
-          <p className="mt-4 text-sm text-dash-muted">Loading users…</p>
+          <p className="mt-4 text-sm text-slate-500">Loading users…</p>
         ) : sortedUsers.length === 0 ? (
-          <p className="mt-4 text-sm text-dash-muted">No users yet.</p>
+          <p className="mt-4 text-sm text-slate-500">No users yet.</p>
         ) : (
-          <table className="mt-4 w-full min-w-[720px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
-                <th className="py-2 pr-4">User</th>
-                <th className="py-2 pr-4">Role</th>
-                <th className="py-2 pr-4">Access</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedUsers.map((user) => (
-                <tr key={user.id} className="border-b border-slate-100">
-                  <td className="py-3 pr-4">
-                    <p className="font-medium text-slate-800">{user.name}</p>
-                    <p className="text-xs text-slate-500">{user.email}</p>
-                  </td>
-                  <td className="py-3 pr-4">{ROLE_LABELS[user.role]}</td>
-                  <td className="py-3 pr-4">
-                    <div className="flex flex-wrap gap-1">
-                      {(user.role === "super_admin"
-                        ? APP_TAB_IDS
-                        : user.permissions
-                      ).map((tab) => (
-                        <span
-                          key={`${user.id}-${tab}`}
-                          className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600"
-                        >
-                          {TAB_LABELS[tab as AppTabId] ?? tab}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="py-3 pr-4">
-                    {user.isActive ? "Active" : "Disabled"}
-                  </td>
-                  <td className="py-3">
-                    {user.role === "super_admin" ? (
-                      <span className="text-xs text-slate-400">Protected</span>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void toggleUserActive(user)}
-                      >
-                        {user.isActive ? "Disable" : "Enable"}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="mt-4 divide-y divide-slate-100">
+            {sortedUsers.map((user) => (
+              <div
+                key={user.id}
+                className="flex flex-wrap items-center justify-between gap-3 py-4 first:pt-0 last:pb-0"
+              >
+                <div>
+                  <p className="font-medium text-slate-800">{user.name}</p>
+                  <p className="text-xs text-slate-500">{user.email}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {ROLE_LABELS[user.role]}
+                    {!user.isActive && " · Disabled"}
+                  </p>
+                </div>
+                {user.role !== "super_admin" && (
+                  <button
+                    type="button"
+                    onClick={() => void toggleUserActive(user)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    {user.isActive ? "Disable" : "Enable"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

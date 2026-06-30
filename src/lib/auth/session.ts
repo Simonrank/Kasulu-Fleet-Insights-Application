@@ -1,6 +1,6 @@
 import type { Session } from "next-auth";
 import { auth } from "@/auth";
-import { isSuperAdmin } from "@/lib/auth/permissions";
+import { isSuperAdmin, canManageUsers } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/types";
 
 declare module "next-auth" {
@@ -20,6 +20,14 @@ export async function requireSession(): Promise<Session> {
     throw new Error("Unauthorized");
   }
   return session;
+}
+
+export async function requireUserManager(): Promise<SessionUser> {
+  const session = await requireSession();
+  if (!canManageUsers(session.user.role)) {
+    throw new Error("Forbidden");
+  }
+  return session.user;
 }
 
 export async function requireSuperAdmin(): Promise<SessionUser> {

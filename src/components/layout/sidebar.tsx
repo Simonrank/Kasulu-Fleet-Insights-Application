@@ -30,7 +30,7 @@ const NAV_ITEMS: {
   { id: "fuel-thefts", label: "Fuel Thefts", icon: Fuel },
   { id: "driver-incidents", label: "Driver Incidents", icon: Users },
   { id: "reports", label: "Reports", icon: FileBarChart },
-  { id: "users", label: "User management", icon: Shield },
+  { id: "users", label: "User Management", icon: Shield },
 ];
 
 type Props = {
