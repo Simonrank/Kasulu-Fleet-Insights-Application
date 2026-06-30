@@ -1,46 +1,32 @@
 import { eq } from "drizzle-orm";
 import { hashPassword } from "@/lib/auth/password";
 import { defaultPermissionsForRole } from "@/lib/auth/permissions";
+import { getSuperAdminSeedConfig } from "@/lib/config/auth";
 import { db, schema } from "@/lib/db";
+import type { UserRole } from "@/lib/db/schema";
 
-function readSuperAdminEmail(): string {
-  return (
-    process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase() ??
-    "simon@controltech-ea.com"
-  );
-}
+const SUPER_ADMIN_ROLE: UserRole = "super_admin";
 
-function readSuperAdminPassword(): string | null {
-  const value = process.env.SUPER_ADMIN_PASSWORD?.trim();
-  return value || null;
-}
-
-function readSuperAdminName(): string {
-  return process.env.SUPER_ADMIN_NAME?.trim() ?? "Simon";
-}
-
-/** Creates or updates the configured super-admin account on startup. */
+/** Creates or updates the super-admin account from environment variables. */
 export async function ensureSuperAdminUser(): Promise<void> {
-  const password = readSuperAdminPassword();
-  if (!password) return;
+  const config = getSuperAdminSeedConfig();
+  if (!config) return;
 
-  const email = readSuperAdminEmail();
-  const name = readSuperAdminName();
-  const passwordHash = await hashPassword(password);
-  const permissions = defaultPermissionsForRole("super_admin");
+  const passwordHash = await hashPassword(config.password);
+  const permissions = defaultPermissionsForRole(SUPER_ADMIN_ROLE);
 
   const existing = await db
     .select()
     .from(schema.appUsers)
-    .where(eq(schema.appUsers.email, email))
+    .where(eq(schema.appUsers.email, config.email))
     .limit(1);
 
   if (existing[0]) {
     await db
       .update(schema.appUsers)
       .set({
-        name,
-        role: "super_admin",
+        name: config.name,
+        role: SUPER_ADMIN_ROLE,
         permissions,
         passwordHash,
         isActive: true,
@@ -51,9 +37,9 @@ export async function ensureSuperAdminUser(): Promise<void> {
   }
 
   await db.insert(schema.appUsers).values({
-    email,
-    name,
-    role: "super_admin",
+    email: config.email,
+    name: config.name,
+    role: SUPER_ADMIN_ROLE,
     permissions,
     passwordHash,
     isActive: true,

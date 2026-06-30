@@ -3,10 +3,11 @@ import Credentials from "next-auth/providers/credentials";
 import { authConfig } from "@/lib/auth/config";
 import { verifyPassword } from "@/lib/auth/password";
 import { findUserByEmail, findUserById } from "@/lib/auth/users";
+import { getAuthSecret } from "@/lib/config/auth";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
-  secret: process.env.AUTH_SECRET,
+  secret: getAuthSecret(),
   trustHost: true,
   callbacks: {
     ...authConfig.callbacks,
