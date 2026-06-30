@@ -118,7 +118,11 @@ export function Sidebar({
           <button
             type="button"
             className="sidebar__nav-btn w-full"
-            onClick={() => void signOut({ callbackUrl: "/login" })}
+            onClick={() => {
+              void signOut({ redirect: false }).then(() => {
+                window.location.assign(`${window.location.origin}/login`);
+              });
+            }}
           >
             <span className="sidebar__nav-icon">
               <LogOut className="h-[1.15rem] w-[1.15rem]" strokeWidth={2} />

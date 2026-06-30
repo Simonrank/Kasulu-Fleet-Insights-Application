@@ -34,7 +34,10 @@ export function LoginForm() {
       return;
     }
 
-    router.push(result?.url ?? callbackUrl);
+    const destination = callbackUrl.startsWith("/")
+      ? callbackUrl
+      : "/";
+    router.push(destination);
     router.refresh();
   }
 

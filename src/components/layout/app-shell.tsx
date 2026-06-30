@@ -11,7 +11,7 @@ import { TheftTypeFilterBar } from "@/components/layout/theft-type-filter-bar";
 import { UtilizationViewFilterBar } from "@/components/layout/utilization-view-filter-bar";
 import { Sidebar, type NavView } from "@/components/layout/sidebar";
 import { accessibleTabs } from "@/lib/auth/permissions";
-import type { NavTabId } from "@/lib/auth/types";
+import { APP_TAB_IDS, type NavTabId } from "@/lib/auth/types";
 import { FleetCategoryFilterProvider } from "@/context/fleet-category-filter";
 import { TheftFilterProvider } from "@/context/theft-filter";
 import { UtilizationViewFilterProvider } from "@/context/utilization-view-filter";
@@ -146,7 +146,7 @@ function TabPane({
 
 export function AppShell() {
   const queryClient = useQueryClient();
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const { data: sheetDateRange } = useSheetDateRange();
   const [view, setView] = useState<NavView>("dashboard");
   const [visitedTabs, setVisitedTabs] = useState<Set<NavView>>(
@@ -203,9 +203,16 @@ export function AppShell() {
   }, []);
 
   const allowedViews = useMemo<NavTabId[]>(() => {
-    if (!session?.user) return ["dashboard"];
-    return accessibleTabs(session.user);
-  }, [session?.user]);
+    if (session?.user?.role) {
+      return accessibleTabs(session.user);
+    }
+
+    if (status === "loading") {
+      return [...APP_TAB_IDS];
+    }
+
+    return [...APP_TAB_IDS];
+  }, [session?.user, status]);
 
   useEffect(() => {
     if (!allowedViews.includes(view)) {

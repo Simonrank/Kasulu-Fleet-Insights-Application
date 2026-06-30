@@ -38,6 +38,15 @@ export async function findUserByEmail(email: string) {
   return rows[0] ?? null;
 }
 
+export async function findUserById(id: string) {
+  const rows = await db
+    .select()
+    .from(schema.appUsers)
+    .where(eq(schema.appUsers.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function listAppUsers(): Promise<PublicAppUser[]> {
   const rows = await db
     .select()
