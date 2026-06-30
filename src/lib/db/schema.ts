@@ -34,6 +34,35 @@ export const syncStatusEnum = pgEnum("sync_status", [
   "failed",
 ]);
 
+export const userRoleEnum = pgEnum("user_role", [
+  "super_admin",
+  "admin",
+  "operator",
+  "viewer",
+]);
+
+/** Application users for dashboard access */
+export const appUsers = pgTable(
+  "app_users",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    role: userRoleEnum("role").default("viewer").notNull(),
+    /** Tab ids the user may open, e.g. dashboard, utilization, fuel-thefts */
+    permissions: text("permissions").array().default([]).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [uniqueIndex("app_users_email_idx").on(t.email)]
+);
+
 /** Fleet vehicles synced from Wialon */
 export const units = pgTable(
   "units",
@@ -178,3 +207,5 @@ export type Unit = typeof units.$inferSelect;
 export type DailyUnitMetric = typeof dailyUnitMetrics.$inferSelect;
 export type FuelEvent = typeof fuelEvents.$inferSelect;
 export type DriverIncident = typeof driverIncidents.$inferSelect;
+export type AppUser = typeof appUsers.$inferSelect;
+export type UserRole = AppUser["role"];

@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import {
-  endOfDay,
-  startOfDay,
-  subDays,
-} from "date-fns";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Calendar, Play, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SheetReportingDateRange } from "@/lib/google-sheets/date-range";
+import {
+  darDayKey,
+  formatReportingPeriodLabel,
+  isSameReportingDay,
+  presetReportingRange,
+  reportingDayEndIso,
+} from "@/lib/google-sheets/reporting-date-range";
+import { darCalendarParts } from "@/lib/wialon/day-interval";
 
 type Preset = "today" | "7d" | "30d" | "custom";
 
@@ -30,43 +33,6 @@ function toDatetimeLocalValue(iso: string): string {
 
 function fromDatetimeLocalValue(value: string): string {
   return new Date(value).toISOString();
-}
-
-function presetRange(
-  preset: Exclude<Preset, "custom">,
-  sheetDateRange?: SheetReportingDateRange
-): { from: string; to: string } {
-  const anchor = sheetDateRange?.defaultTo
-    ? new Date(sheetDateRange.defaultTo)
-    : new Date();
-  const maxDay = startOfDay(anchor);
-  const minBound = sheetDateRange?.minDate
-    ? startOfDay(new Date(sheetDateRange.minDate))
-    : null;
-
-  let fromDay: Date;
-  const toDay = endOfDay(maxDay);
-
-  switch (preset) {
-    case "today":
-      fromDay = startOfDay(maxDay);
-      break;
-    case "7d":
-      fromDay = startOfDay(subDays(maxDay, 6));
-      break;
-    case "30d":
-      fromDay = startOfDay(subDays(maxDay, 29));
-      break;
-  }
-
-  if (minBound && fromDay < minBound) {
-    fromDay = minBound;
-  }
-
-  return {
-    from: fromDay.toISOString(),
-    to: toDay.toISOString(),
-  };
 }
 
 const PRESETS: { id: Exclude<Preset, "custom">; label: string }[] = [
@@ -95,7 +61,14 @@ export function AnalysisWindowBar({
 
   const applyPreset = useCallback(
     (next: Exclude<Preset, "custom">) => {
-      const range = presetRange(next, sheetDateRange);
+      const anchorTo = sheetDateRange?.defaultTo ?? new Date().toISOString();
+      const range = presetReportingRange(
+        next,
+        anchorTo,
+        sheetDateRange?.minDate
+          ? new Date(`${sheetDateRange.minDate}T00:00:00`).toISOString()
+          : undefined
+      );
       setPreset(next);
       setDraftFrom(range.from);
       setDraftTo(range.to);
@@ -106,11 +79,54 @@ export function AnalysisWindowBar({
 
   const handleRun = () => {
     onApply(draftFrom, draftTo);
-    onRefresh();
+  };
+
+  const handleSameDay = () => {
+    if (!draftFrom) return;
+    setPreset("custom");
+    setDraftTo(reportingDayEndIso(draftFrom));
+  };
+
+  const handleFromChange = (value: string) => {
+    const nextFrom = fromDatetimeLocalValue(value);
+    setPreset("custom");
+    setDraftFrom(nextFrom);
+
+    if (!draftTo) {
+      setDraftTo(reportingDayEndIso(nextFrom));
+      return;
+    }
+
+    const fromKey = darDayKey(darCalendarParts(new Date(nextFrom)));
+    const toKey = darDayKey(darCalendarParts(new Date(draftTo)));
+    if (toKey < fromKey) {
+      setDraftTo(reportingDayEndIso(nextFrom));
+    }
   };
 
   const minDate = sheetDateRange?.minDate;
   const maxDate = sheetDateRange?.maxDate;
+
+  const appliedLabel = useMemo(
+    () => (from && to ? formatReportingPeriodLabel(from, to) : ""),
+    [from, to]
+  );
+
+  const draftLabel = useMemo(
+    () =>
+      draftFrom && draftTo
+        ? formatReportingPeriodLabel(draftFrom, draftTo)
+        : "",
+    [draftFrom, draftTo]
+  );
+
+  const draftPending =
+    draftFrom !== from ||
+    draftTo !== to ||
+    draftLabel !== appliedLabel;
+
+  const sameDayDraft =
+    draftFrom && draftTo ? isSameReportingDay(draftFrom, draftTo) : false;
 
   return (
     <div className="analysis-window shrink-0 border-b border-slate-200/80 bg-white px-4 py-3 md:px-6">
@@ -147,61 +163,89 @@ export function AnalysisWindowBar({
         )}
 
         <div className="flex flex-wrap items-end gap-3 lg:justify-end">
-            <div className="space-y-1">
-              <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                <Calendar className="h-3 w-3" />
-                From
-              </label>
-              <input
-                type="datetime-local"
-                value={draftFrom ? toDatetimeLocalValue(draftFrom) : ""}
-                min={minDate ? `${minDate}T00:00` : undefined}
-                max={maxDate ? `${maxDate}T23:59` : undefined}
-                onChange={(e) => {
-                  setPreset("custom");
-                  setDraftFrom(fromDatetimeLocalValue(e.target.value));
-                }}
-                className="dash-date-input h-9 min-w-[11.5rem] rounded-lg px-2 text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                <Calendar className="h-3 w-3" />
-                To
-              </label>
-              <input
-                type="datetime-local"
-                value={draftTo ? toDatetimeLocalValue(draftTo) : ""}
-                min={minDate ? `${minDate}T00:00` : undefined}
-                max={maxDate ? `${maxDate}T23:59` : undefined}
-                onChange={(e) => {
-                  setPreset("custom");
-                  setDraftTo(fromDatetimeLocalValue(e.target.value));
-                }}
-                className="dash-date-input h-9 min-w-[11.5rem] rounded-lg px-2 text-sm"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleRun}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#0d9488] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#0f766e]"
-            >
-              <Play className="h-3.5 w-3.5 fill-current" />
-              Run analysis
-            </button>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={isRefreshing}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
-              aria-label="Refresh data"
-              title="Refresh"
-            >
-              <RefreshCw
-                className={cn("h-4 w-4", isRefreshing && "animate-spin")}
+          <div className="space-y-1">
+            <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <Calendar className="h-3 w-3" />
+              From
+            </label>
+            <input
+              type="datetime-local"
+              value={draftFrom ? toDatetimeLocalValue(draftFrom) : ""}
+              min={minDate ? `${minDate}T00:00` : undefined}
+              max={maxDate ? `${maxDate}T23:59` : undefined}
+              onChange={(e) => handleFromChange(e.target.value)}
+              className="dash-date-input h-9 min-w-[11.5rem] rounded-lg px-2 text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <Calendar className="h-3 w-3" />
+              To
+            </label>
+            <input
+              type="datetime-local"
+              value={draftTo ? toDatetimeLocalValue(draftTo) : ""}
+              min={minDate ? `${minDate}T00:00` : undefined}
+              max={maxDate ? `${maxDate}T23:59` : undefined}
+              onChange={(e) => {
+                setPreset("custom");
+                setDraftTo(fromDatetimeLocalValue(e.target.value));
+              }}
+              className="dash-date-input h-9 min-w-[11.5rem] rounded-lg px-2 text-sm"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleSameDay}
+            disabled={!draftFrom}
+            className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-40"
+            title="Set TO to the end of the same day as FROM"
+          >
+            Same day
+          </button>
+          <button
+            type="button"
+            onClick={handleRun}
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#0d9488] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#0f766e]"
+          >
+            <Play className="h-3.5 w-3.5 fill-current" />
+            Run analysis
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            aria-label="Refresh data"
+            title="Refresh"
+          >
+            <RefreshCw
+              className={cn("h-4 w-4", isRefreshing && "animate-spin")}
             />
           </button>
         </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+        {appliedLabel && (
+          <span>
+            Active period:{" "}
+            <span className="font-medium text-slate-700">{appliedLabel}</span>
+            {isSameReportingDay(from, to) ? " (single day)" : " (summed by day)"}
+          </span>
+        )}
+        {draftPending && (
+          <span className="text-amber-700">
+            Unapplied changes — click Run analysis
+            {draftLabel ? ` (${draftLabel})` : ""}
+          </span>
+        )}
+        {!sameDayDraft && draftFrom && draftTo && (
+          <span>
+            Range mode: theft and fuel totals are summed across each day in the
+            period.
+          </span>
+        )}
       </div>
     </div>
   );

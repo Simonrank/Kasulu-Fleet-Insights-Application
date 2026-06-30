@@ -78,6 +78,9 @@ export function wialonViolationsToIncidents(
     if (isFuelDrainViolationText(row.violationText)) continue;
 
     const { key } = violationTypeFromText(row.violationText);
+    const incidentType = isPowerDisconnectionViolationText(row.violationText)
+      ? POWER_DISCONNECTION_GROUP
+      : key;
     const numbers = parseNumbersFromText(row.violationText);
     const occurredAt =
       row.occurredAt?.toISOString() ??
@@ -91,7 +94,7 @@ export function wialonViolationsToIncidents(
       unitId: unitIds.get(row.unitName) ?? row.unitName,
       unitName: row.unitName,
       driverName: null,
-      incidentType: key,
+      incidentType,
       severity: "low",
       value: numbers.value,
       threshold: numbers.threshold,
@@ -271,6 +274,29 @@ export const SPEED_VIOLATION_BUCKETS = [
 
 export const OTHER_VIOLATIONS_GROUP = "other_violations";
 
+export const POWER_DISCONNECTION_GROUP = "power_disconnection";
+
+/** Wialon violation text for low voltage / power disconnection events. */
+export function isPowerDisconnectionViolationText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("power disconnection") ||
+    lower.includes("low power voltage") ||
+    (lower.includes("low power") && lower.includes("voltage"))
+  );
+}
+
+export function isPowerDisconnectionViolation(row: DriverIncidentRow): boolean {
+  return isPowerDisconnectionViolationText(
+    `${row.description ?? ""} ${incidentTypeLabel(row.incidentType)}`
+  );
+}
+
+registerTypeLabel(
+  POWER_DISCONNECTION_GROUP,
+  "Low power / Power disconnection"
+);
+
 /** Parsed speed (km/h) when the incident row represents a speed event. */
 export function incidentSpeedKmh(row: DriverIncidentRow): number | null {
   if (row.value == null || row.value <= 0) return null;
@@ -297,6 +323,9 @@ export function speedBucketKey(speedKmh: number): string {
 }
 
 export function violationGroupKey(row: DriverIncidentRow): string {
+  if (isPowerDisconnectionViolation(row)) {
+    return POWER_DISCONNECTION_GROUP;
+  }
   const speed = incidentSpeedKmh(row);
   if (speed != null) return speedBucketKey(speed);
   return OTHER_VIOLATIONS_GROUP;
@@ -305,6 +334,9 @@ export function violationGroupKey(row: DriverIncidentRow): string {
 export function violationGroupLabel(groupKey: string): string {
   const bucket = SPEED_VIOLATION_BUCKETS.find((b) => b.key === groupKey);
   if (bucket) return bucket.label;
+  if (groupKey === POWER_DISCONNECTION_GROUP) {
+    return "Low power / Power disconnection";
+  }
   if (groupKey === OTHER_VIOLATIONS_GROUP) return "Other violations";
   return incidentTypeLabel(groupKey);
 }
@@ -318,6 +350,7 @@ export function matchesViolationGroup(
 
 const GROUP_CARD_ORDER = [
   ...SPEED_VIOLATION_BUCKETS.map((b) => b.key),
+  POWER_DISCONNECTION_GROUP,
   OTHER_VIOLATIONS_GROUP,
 ];
 

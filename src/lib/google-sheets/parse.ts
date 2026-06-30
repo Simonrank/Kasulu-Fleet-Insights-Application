@@ -1,4 +1,5 @@
 import { parseISO, isValid, parse } from "date-fns";
+import { darDayToDate } from "@/lib/wialon/day-interval";
 import type { TheftType } from "@/lib/types";
 import { isUnitUpdating } from "@/lib/fleet/connectivity";
 
@@ -37,12 +38,17 @@ export function parseSheetDate(value: string): Date | null {
     /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
   );
   if (dmy) {
-    const parsed = parse(
-      `${dmy[1]}/${dmy[2]}/${dmy[3]}${dmy[4] ? ` ${dmy[4]}:${dmy[5]}:${dmy[6] ?? "00"}` : ""}`,
-      dmy[4] ? "dd/MM/yyyy HH:mm:ss" : "dd/MM/yyyy",
-      new Date()
-    );
-    if (isValid(parsed)) return parsed;
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]);
+    const year = Number(dmy[3]);
+    if (!dmy[4]) {
+      return darDayToDate({ year, month, day });
+    }
+    const base = darDayToDate({ year, month, day });
+    const offsetMs =
+      (Number(dmy[4]) * 3600 + Number(dmy[5]) * 60 + Number(dmy[6] ?? 0)) *
+      1000;
+    return new Date(base.getTime() + offsetMs);
   }
 
   // dd.MM.yyyy HH:mm:ss
@@ -50,12 +56,17 @@ export function parseSheetDate(value: string): Date | null {
     /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}):(\d{2}))?$/
   );
   if (dot) {
-    const parsed = parse(
-      `${dot[1]}.${dot[2]}.${dot[3]}${dot[4] ? ` ${dot[4]}:${dot[5]}:${dot[6]}` : ""}`,
-      dot[4] ? "dd.MM.yyyy HH:mm:ss" : "dd.MM.yyyy",
-      new Date()
-    );
-    if (isValid(parsed)) return parsed;
+    const day = Number(dot[1]);
+    const month = Number(dot[2]);
+    const year = Number(dot[3]);
+    if (!dot[4]) {
+      return darDayToDate({ year, month, day });
+    }
+    const base = darDayToDate({ year, month, day });
+    const offsetMs =
+      (Number(dot[4]) * 3600 + Number(dot[5]) * 60 + Number(dot[6] ?? 0)) *
+      1000;
+    return new Date(base.getTime() + offsetMs);
   }
 
   const iso = parseISO(trimmed);

@@ -7,19 +7,18 @@ import {
   FileBarChart,
   Fuel,
   LayoutDashboard,
+  LogOut,
+  Shield,
   TrendingUp,
   Users,
 } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
+import type { NavTabId } from "@/lib/auth/types";
 
 const OPS_AREA = process.env.NEXT_PUBLIC_OPS_AREA;
 
-export type NavView =
-  | "dashboard"
-  | "utilization"
-  | "fuel-thefts"
-  | "driver-incidents"
-  | "reports";
+export type NavView = NavTabId;
 
 const NAV_ITEMS: {
   id: NavView;
@@ -31,21 +30,34 @@ const NAV_ITEMS: {
   { id: "fuel-thefts", label: "Fuel Thefts", icon: Fuel },
   { id: "driver-incidents", label: "Driver Incidents", icon: Users },
   { id: "reports", label: "Reports", icon: FileBarChart },
+  { id: "users", label: "User management", icon: Shield },
 ];
 
 type Props = {
   active: NavView;
+  allowedViews: NavView[];
   onNavigate: (view: NavView) => void;
   onExpandChange?: (expanded: boolean) => void;
   onPrefetch?: (view: NavView) => void;
 };
 
-export function Sidebar({ active, onNavigate, onExpandChange, onPrefetch }: Props) {
+export function Sidebar({
+  active,
+  allowedViews,
+  onNavigate,
+  onExpandChange,
+  onPrefetch,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
+  const { data: session } = useSession();
 
   useEffect(() => {
     onExpandChange?.(expanded);
   }, [expanded, onExpandChange]);
+
+  const visibleItems = NAV_ITEMS.filter((item) =>
+    allowedViews.includes(item.id)
+  );
 
   return (
     <aside
@@ -71,7 +83,7 @@ export function Sidebar({ active, onNavigate, onExpandChange, onPrefetch }: Prop
         </div>
 
         <nav className="sidebar__nav" aria-label="Primary">
-          {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
+          {visibleItems.map(({ id, label, icon: Icon }) => {
             const isActive = active === id;
 
             return (
@@ -98,7 +110,22 @@ export function Sidebar({ active, onNavigate, onExpandChange, onPrefetch }: Prop
         </nav>
 
         <div className="sidebar__info">
-          <p className="sidebar__info-text">
+          {session?.user?.email && (
+            <p className="sidebar__info-text mb-2 truncate">
+              {session.user.name ?? session.user.email}
+            </p>
+          )}
+          <button
+            type="button"
+            className="sidebar__nav-btn w-full"
+            onClick={() => void signOut({ callbackUrl: "/login" })}
+          >
+            <span className="sidebar__nav-icon">
+              <LogOut className="h-[1.15rem] w-[1.15rem]" strokeWidth={2} />
+            </span>
+            <span className="sidebar__label">Sign out</span>
+          </button>
+          <p className="sidebar__info-text mt-3">
             {OPS_AREA ??
               "Fleet data syncs with your analysis window on each view."}
           </p>

@@ -20,6 +20,7 @@ import {
 } from "@/lib/fleet/category-kpis";
 import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
 import { cn, formatNumber } from "@/lib/utils";
+import { formatReportingPeriodLabel, isSameReportingDay } from "@/lib/google-sheets/reporting-date-range";
 import type { ConnectivityFilter, FleetSummary, KpiSummary } from "@/lib/types";
 import { filterTheftEvents } from "@/lib/fleet/theft-filters";
 import {
@@ -66,24 +67,29 @@ type Props = {
   to: string;
 };
 
-function DashboardSkeleton() {
+function DashboardSkeleton({ liveConnectivity }: { liveConnectivity?: React.ReactNode }) {
   return (
-    <div className="space-y-6 p-6 md:p-8">
-      <div className="h-24 animate-pulse rounded-2xl bg-slate-200/60" />
-      <div className="flex gap-3">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-10 w-32 animate-pulse rounded-full bg-slate-200/60" />
-        ))}
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="space-y-8">
+      <div className="dash-metrics-grid">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="h-[8.75rem] animate-pulse rounded-2xl bg-white shadow-sm" />
+          <div
+            key={i}
+            className="h-[8.75rem] animate-pulse rounded-2xl border border-slate-200/80 bg-white shadow-sm"
+          />
         ))}
       </div>
+
       <div className="grid gap-6 lg:grid-cols-5">
-        <div className="h-80 animate-pulse rounded-2xl bg-white shadow-sm lg:col-span-3" />
-        <div className="h-80 animate-pulse rounded-2xl bg-white shadow-sm lg:col-span-2" />
+        <div className="h-80 animate-pulse rounded-2xl border border-slate-200/80 bg-white shadow-sm lg:col-span-3" />
+        <div className="min-w-0 lg:col-span-2">
+          {liveConnectivity ?? (
+            <div className="h-80 animate-pulse rounded-2xl border border-slate-200/80 bg-white shadow-sm" />
+          )}
+        </div>
       </div>
+
+      <div className="h-72 animate-pulse rounded-2xl border border-slate-200/80 bg-white shadow-sm" />
+      <div className="h-64 animate-pulse rounded-2xl border border-slate-200/80 bg-white shadow-sm" />
     </div>
   );
 }
@@ -452,69 +458,32 @@ function DashboardContent({ from, to }: Props) {
       }));
   }, [thefts, theftType, selectedUnitId]);
 
-  if (isLoading && !kpiMetrics && !liveRows.length) {
-    return (
-      <div className="dashboard-workspace min-h-full">
-        <div className="relative space-y-8 p-6 md:p-8">
-          <div className="grid gap-6 lg:grid-cols-5">
-            <div className="min-w-0 lg:col-span-2 lg:col-start-4">
-              <ConnectivityPanel
-                data={connectivityKpis}
-                fleet={connectivityFleet}
-                filter={connectivityFilter}
-                onFilterChange={setConnectivityFilter}
-                isLive
-              />
-            </div>
-          </div>
-          <CurrentAssetLocationTable
-            rows={liveRows}
-            isLoading={
-              liveLocationsLoading ||
-              (liveLocationsFetching && liveRows.length === 0)
-            }
-            error={
-              liveLocationsError instanceof Error
-                ? liveLocationsError.message
-                : null
-            }
-          />
-          <DashboardSkeleton />
-        </div>
-      </div>
-    );
-  }
+  const sheetPending = !kpiMetrics || !thefts || !kpis;
 
-  if (!kpiMetrics || !thefts || !kpis) {
+  const connectivityPanel = (
+    <ConnectivityPanel
+      data={connectivityKpis}
+      fleet={connectivityFleet}
+      filter={connectivityFilter}
+      onFilterChange={setConnectivityFilter}
+      isLive
+    />
+  );
+
+  if (sheetPending) {
     return (
       <div className="dashboard-workspace min-h-full">
         <div className="relative space-y-8 p-6 md:p-8">
-          <div className="grid gap-6 lg:grid-cols-5">
-            <div className="min-w-0 lg:col-span-2 lg:col-start-4">
-              <ConnectivityPanel
-                data={connectivityKpis}
-                fleet={connectivityFleet}
-                filter={connectivityFilter}
-                onFilterChange={setConnectivityFilter}
-                isLive
-              />
-            </div>
-          </div>
-          <CurrentAssetLocationTable
-            rows={liveRows}
-            isLoading={
-              liveLocationsLoading ||
-              (liveLocationsFetching && liveRows.length === 0)
-            }
-            error={
-              liveLocationsError instanceof Error
-                ? liveLocationsError.message
-                : null
-            }
-          />
-          <p className="text-center text-sm text-slate-600">
-            Sheet metrics are still loading…
+          <p
+            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
+            aria-live="polite"
+          >
+            Loading fleet metrics from Google Sheets… live connectivity may appear
+            first.
           </p>
+          <DashboardSkeleton
+            liveConnectivity={liveRows.length > 0 ? connectivityPanel : undefined}
+          />
         </div>
       </div>
     );
@@ -525,11 +494,24 @@ function DashboardContent({ from, to }: Props) {
       <div className="dashboard-workspace__glow pointer-events-none" aria-hidden />
 
       <div className="relative space-y-8 p-6 md:p-8">
-        {isFetching && (
-          <p className="text-xs text-[#0d9488]/80" aria-live="polite">
-            Refreshing live sheet data…
+        {(isFetching || isLoading) && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600" aria-live="polite">
+            Updating period… fuel and theft totals reflect the selected analysis window.
           </p>
         )}
+
+        <p className="text-sm text-slate-600">
+          Reporting period:{" "}
+          <span className="font-medium text-slate-800">
+            {formatReportingPeriodLabel(from, to)}
+          </span>
+          {" · "}
+          {isSameReportingDay(from, to)
+            ? `${theftEvents} theft event${theftEvents === 1 ? "" : "s"} on this day`
+            : `${theftEvents} theft event${theftEvents === 1 ? "" : "s"} summed across days`}
+          {" · "}
+          {formatNumber(totalTheftLiters, 1)} L total stolen
+        </p>
 
         {selectedUnit && (
           <VehicleDetailPanel
@@ -584,7 +566,7 @@ function DashboardContent({ from, to }: Props) {
           />
           <MetricCard
             title="Direct theft"
-            value={`${formatNumber(kpiMetrics.directThefts.volumeLiters, 0)} L`}
+            value={`${formatNumber(kpiMetrics.directThefts.volumeLiters, 1)} L`}
             detail={`${kpiMetrics.directThefts.count} direct drain events`}
             tone="danger"
           />

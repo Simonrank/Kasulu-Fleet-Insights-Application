@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { prefetchFleetDataset } from "@/lib/google-sheets/fleet-dataset";
 import { hasGoogleSheetsCredentials } from "@/lib/google-sheets/client";
 import { isGoogleSheetsConfigured } from "@/lib/config/env";
+import { parseReportingDateRange } from "@/lib/google-sheets/reporting-date-range";
 import { loadDashboardBundle } from "@/lib/dashboard/load-bundle";
-import { parseDateRange } from "@/lib/utils";
 
 /** Large sheets can exceed Vercel's default 10s limit — allow up to 60s on Pro. */
 export const maxDuration = 60;
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     }
 
     const { searchParams } = new URL(request.url);
-    const { from, to } = parseDateRange(
+    const { from, to } = parseReportingDateRange(
       searchParams.get("from"),
       searchParams.get("to")
     );

@@ -5,6 +5,7 @@ import type {
   UnitLatestRow,
 } from "@/lib/types";
 import type { SheetReportingDateRange } from "@/lib/google-sheets/date-range";
+import { normalizeReportingRange } from "@/lib/google-sheets/reporting-date-range";
 
 function buildQuery(from: string, to: string, extra?: Record<string, string>) {
   return new URLSearchParams({ from, to, ...extra }).toString();
@@ -27,7 +28,10 @@ export async function fetchDashboard(
   from: string,
   to: string
 ): Promise<DashboardBundle> {
-  const res = await fetch(`/api/dashboard?${buildQuery(from, to)}`);
+  const range = normalizeReportingRange(from, to);
+  const res = await fetch(
+    `/api/dashboard?${buildQuery(range.fromIso, range.toIso)}`
+  );
   return readJson(res, "Failed to load dashboard");
 }
 

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
+import { useSession } from "next-auth/react";
 import { cn, defaultViolationsFromIso } from "@/lib/utils";
 import { FleetDashboard } from "@/components/dashboard/fleet-dashboard";
 import { AnalysisWindowBar } from "@/components/layout/analysis-window-bar";
@@ -9,10 +10,11 @@ import { CategoryFilterBar } from "@/components/layout/category-filter-bar";
 import { TheftTypeFilterBar } from "@/components/layout/theft-type-filter-bar";
 import { UtilizationViewFilterBar } from "@/components/layout/utilization-view-filter-bar";
 import { Sidebar, type NavView } from "@/components/layout/sidebar";
+import { accessibleTabs } from "@/lib/auth/permissions";
+import type { NavTabId } from "@/lib/auth/types";
 import { FleetCategoryFilterProvider } from "@/context/fleet-category-filter";
 import { TheftFilterProvider } from "@/context/theft-filter";
 import { UtilizationViewFilterProvider } from "@/context/utilization-view-filter";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   prefetchDriverIncidentsQuery,
   prefetchFleetQueries,
@@ -108,6 +110,14 @@ const ReportsTab = lazyTab(
   "Loading reports…"
 );
 
+const UserManagementTab = lazyTab(
+  () =>
+    import("@/components/dashboard/user-management-tab").then((m) => ({
+      default: m.UserManagementTab as ComponentType<LazyTabProps>,
+    })),
+  "Loading user management…"
+);
+
 function tabExtraFilters(view: NavView) {
   return (
     <>
@@ -136,6 +146,7 @@ function TabPane({
 
 export function AppShell() {
   const queryClient = useQueryClient();
+  const { data: session } = useSession();
   const { data: sheetDateRange } = useSheetDateRange();
   const [view, setView] = useState<NavView>("dashboard");
   const [visitedTabs, setVisitedTabs] = useState<Set<NavView>>(
@@ -153,15 +164,15 @@ export function AppShell() {
     setTo(sheetDateRange.defaultTo);
   }, [sheetDateRange, from, to]);
 
-  const debouncedFrom = useDebouncedValue(from ?? sheetDateRange?.defaultFrom ?? "", 350);
-  const debouncedTo = useDebouncedValue(to ?? sheetDateRange?.defaultTo ?? "", 350);
-  const rangeReady = Boolean(debouncedFrom && debouncedTo);
+  const analysisFrom = from ?? sheetDateRange?.defaultFrom ?? "";
+  const analysisTo = to ?? sheetDateRange?.defaultTo ?? "";
+  const rangeReady = Boolean(analysisFrom && analysisTo);
 
   const driverIncidentsFrom = useMemo(() => {
     if (!rangeReady) return "";
-    if (violationsUseCustomRange) return debouncedFrom;
-    return defaultViolationsFromIso(debouncedTo);
-  }, [debouncedFrom, debouncedTo, violationsUseCustomRange, rangeReady]);
+    if (violationsUseCustomRange) return analysisFrom;
+    return defaultViolationsFromIso(analysisTo);
+  }, [analysisFrom, analysisTo, violationsUseCustomRange, rangeReady]);
 
   const handleApplyRange = useCallback((nextFrom: string, nextTo: string) => {
     setFrom(nextFrom);
@@ -174,7 +185,7 @@ export function AppShell() {
     try {
       await queryClient.invalidateQueries();
       if (rangeReady) {
-        prefetchFleetQueries(queryClient, debouncedFrom, debouncedTo);
+        prefetchFleetQueries(queryClient, analysisFrom, analysisTo);
       }
     } finally {
       setIsRefreshing(false);
@@ -182,8 +193,8 @@ export function AppShell() {
   }, [
     queryClient,
     rangeReady,
-    debouncedFrom,
-    debouncedTo,
+    analysisFrom,
+    analysisTo,
     driverIncidentsFrom,
   ]);
 
@@ -191,18 +202,30 @@ export function AppShell() {
     setSidebarExpanded(expanded);
   }, []);
 
+  const allowedViews = useMemo<NavTabId[]>(() => {
+    if (!session?.user) return ["dashboard"];
+    return accessibleTabs(session.user);
+  }, [session?.user]);
+
+  useEffect(() => {
+    if (!allowedViews.includes(view)) {
+      setView(allowedViews[0] ?? "dashboard");
+    }
+  }, [allowedViews, view]);
+
   const handlePrefetch = useCallback(
     (target: NavView) => {
-      prefetchFleetQueries(queryClient, debouncedFrom, debouncedTo);
-      if (target === "driver-incidents" && driverIncidentsFrom && debouncedTo) {
+      if (target === "users") return;
+      prefetchFleetQueries(queryClient, analysisFrom, analysisTo);
+      if (target === "driver-incidents" && driverIncidentsFrom && analysisTo) {
         prefetchDriverIncidentsQuery(
           queryClient,
           driverIncidentsFrom,
-          debouncedTo
+          analysisTo
         );
       }
     },
-    [queryClient, debouncedFrom, debouncedTo, driverIncidentsFrom]
+    [queryClient, analysisFrom, analysisTo, driverIncidentsFrom]
   );
 
   useEffect(() => {
@@ -228,23 +251,23 @@ export function AppShell() {
     prefetchDriverIncidentsQuery(
       queryClient,
       driverIncidentsFrom,
-      debouncedTo
+      analysisTo
     );
   }, [
     queryClient,
     rangeReady,
     view,
     driverIncidentsFrom,
-    debouncedTo,
+    analysisTo,
   ]);
 
   useEffect(() => {
     if (!rangeReady) return;
-    prefetchFleetQueries(queryClient, debouncedFrom, debouncedTo);
-  }, [queryClient, debouncedFrom, debouncedTo, rangeReady]);
+    prefetchFleetQueries(queryClient, analysisFrom, analysisTo);
+  }, [queryClient, analysisFrom, analysisTo, rangeReady]);
 
   return (
-    <FleetCategoryFilterProvider from={debouncedFrom} to={debouncedTo}>
+    <FleetCategoryFilterProvider from={analysisFrom} to={analysisTo}>
       <TheftFilterProvider>
       <UtilizationViewFilterProvider>
       <div
@@ -255,6 +278,7 @@ export function AppShell() {
       >
       <Sidebar
         active={view}
+        allowedViews={allowedViews}
         onNavigate={setView}
         onExpandChange={handleSidebarExpand}
         onPrefetch={handlePrefetch}
@@ -279,7 +303,7 @@ export function AppShell() {
         >
           <TabPane active={view === "dashboard"}>
             {rangeReady ? (
-              <FleetDashboard from={debouncedFrom} to={debouncedTo} />
+              <FleetDashboard from={analysisFrom} to={analysisTo} />
             ) : (
               <TabSkeleton label="Loading dashboard…" />
             )}
@@ -288,7 +312,7 @@ export function AppShell() {
           {visitedTabs.has("utilization") && (
             <TabPane active={view === "utilization"}>
               {rangeReady ? (
-                <UtilizationTab from={debouncedFrom} to={debouncedTo} />
+                <UtilizationTab from={analysisFrom} to={analysisTo} />
               ) : (
                 <TabSkeleton label="Loading utilization…" />
               )}
@@ -298,7 +322,7 @@ export function AppShell() {
           {visitedTabs.has("fuel-thefts") && (
             <TabPane active={view === "fuel-thefts"}>
               {rangeReady ? (
-                <FuelTheftsTab from={debouncedFrom} to={debouncedTo} />
+                <FuelTheftsTab from={analysisFrom} to={analysisTo} />
               ) : (
                 <TabSkeleton label="Loading fuel thefts…" />
               )}
@@ -310,7 +334,7 @@ export function AppShell() {
               {rangeReady ? (
                 <DriverIncidentsTab
                   from={driverIncidentsFrom}
-                  to={debouncedTo}
+                  to={analysisTo}
                   isDefault24h={!violationsUseCustomRange}
                 />
               ) : (
@@ -322,10 +346,16 @@ export function AppShell() {
           {visitedTabs.has("reports") && (
             <TabPane active={view === "reports"}>
               {rangeReady ? (
-                <ReportsTab from={debouncedFrom} to={debouncedTo} />
+                <ReportsTab from={analysisFrom} to={analysisTo} />
               ) : (
                 <TabSkeleton label="Loading reports…" />
               )}
+            </TabPane>
+          )}
+
+          {visitedTabs.has("users") && allowedViews.includes("users") && (
+            <TabPane active={view === "users"}>
+              <UserManagementTab />
             </TabPane>
           )}
         </main>

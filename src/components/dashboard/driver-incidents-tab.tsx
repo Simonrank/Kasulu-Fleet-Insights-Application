@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Filter, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useDriverIncidents } from "@/hooks/use-fleet-data";
 import { ViolationEventsTable } from "@/components/dashboard/violation-events-table";
 import { ViolationOverviewCards } from "@/components/dashboard/violation-overview-cards";
@@ -13,13 +13,6 @@ import {
   violationGroupLabel,
   violationTypeColor,
 } from "@/lib/fleet/violations-model";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Bar,
   BarChart,
@@ -70,7 +63,6 @@ export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
   const [search, setSearch] = useState("");
   const [incidentType, setIncidentType] = useState("all");
   const [selectedType, setSelectedType] = useState<string | null>(null);
-  const [severity, setSeverity] = useState("all");
   const detailsRef = useRef<HTMLDivElement>(null);
   const { data, isLoading, isFetching, error } = useDriverIncidents(from, to);
 
@@ -98,7 +90,6 @@ export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
     const query = search.trim().toLowerCase();
 
     return incidents.filter((row) => {
-      if (severity !== "all" && row.severity !== severity) return false;
       if (!query) return true;
 
       const typeLabel = incidentTypeLabel(row.incidentType);
@@ -108,7 +99,7 @@ export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
         .toLowerCase()
         .includes(query);
     });
-  }, [incidents, search, severity]);
+  }, [incidents, search]);
 
   const typeSummaries = useMemo(
     () => summarizeViolationGroups(filteredRows),
@@ -149,7 +140,6 @@ export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
 
   const hasActiveFilters =
     search.length > 0 ||
-    severity !== "all" ||
     selectedType != null;
 
   if ((isLoading && !data) || (isFetching && !data)) {
@@ -185,30 +175,6 @@ export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
             placeholder="Unit, violation type, location…"
             className="dash-date-input h-9 w-full rounded-lg px-3 text-sm"
           />
-        </div>
-        <div className="space-y-1">
-          <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-            <Filter className="h-3 w-3" />
-            Severity
-          </label>
-          <Select value={severity} onValueChange={setSeverity}>
-            <SelectTrigger className="dash-date-input h-9 min-w-[11rem] rounded-lg px-3 text-sm">
-              <SelectValue placeholder="All severities" />
-            </SelectTrigger>
-            <SelectContent>
-              {[
-                { value: "all", label: "All severities" },
-                { value: "critical", label: "Critical" },
-                { value: "high", label: "High" },
-                { value: "medium", label: "Medium" },
-                { value: "low", label: "Low" },
-              ].map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
@@ -255,7 +221,8 @@ export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
       ) : (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-10 text-center">
           <p className="text-sm font-medium text-slate-700">
-            Select a speed band or other violations above, or click a chart segment
+            Select a speed band, power disconnection, or other violations above,
+            or click a chart segment
           </p>
           <p className="mt-1 text-xs text-slate-500">
             Event details will appear here — unit, times, duration, and location
@@ -265,8 +232,8 @@ export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel
-          title="Violations by speed band"
-          subtitle="Speed events grouped by km/h · click to filter the table"
+          title="Violations by category"
+          subtitle="Speed bands and power disconnection · click to filter the table"
         >
           {typeChartData.length === 0 ? (
             <p className="py-16 text-center text-sm text-dash-muted">

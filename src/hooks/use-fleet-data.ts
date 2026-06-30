@@ -22,6 +22,7 @@ import {
   fetchSpeedViolations,
 } from "@/lib/api/fleet-fetch";
 import { fleetQueryKeys } from "@/lib/api/query-keys";
+import { normalizeReportingRange } from "@/lib/google-sheets/reporting-date-range";
 
 const SHEET_STALE_MS = 300_000;
 const TELEMATICS_STALE_MS = 5 * 60_000;
@@ -49,8 +50,10 @@ export function prefetchFleetQueries(
 
   if (!from || !to) return;
 
+  const range = normalizeReportingRange(from, to);
+
   void queryClient.prefetchQuery({
-    queryKey: fleetQueryKeys.dashboard(from, to),
+    queryKey: fleetQueryKeys.dashboard(range.fromIso, range.toIso),
     queryFn: () => fetchDashboard(from, to),
     staleTime: SHEET_STALE_MS,
   });
@@ -94,14 +97,15 @@ export function prefetchDriverIncidentsQuery(
 
 /** Dashboard KPIs, thefts, fleet, and utilization — one Google Sheets request. */
 export function useDashboard(from: string, to: string) {
+  const range = normalizeReportingRange(from, to);
   return useQuery<DashboardBundle>({
-    queryKey: fleetQueryKeys.dashboard(from, to),
+    queryKey: fleetQueryKeys.dashboard(range.fromIso, range.toIso),
     queryFn: () => fetchDashboard(from, to),
     enabled: Boolean(from && to),
     staleTime: SHEET_STALE_MS,
     gcTime: 10 * 60_000,
     placeholderData: (previousData, previousQuery) => {
-      const currentKey = fleetQueryKeys.dashboard(from, to);
+      const currentKey = fleetQueryKeys.dashboard(range.fromIso, range.toIso);
       const prevKey = previousQuery?.queryKey;
       if (
         prevKey?.[0] === currentKey[0] &&
