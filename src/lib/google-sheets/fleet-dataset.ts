@@ -1,21 +1,27 @@
 import { loadUnitIdMap } from "@/lib/db/unit-id-map";
 import { googleSheetsConfig, isGoogleSheetsConfigured } from "@/lib/config/env";
-import { fetchSheetRange } from "@/lib/google-sheets/client";
+import { fetchSheetRanges } from "@/lib/google-sheets/client";
 import {
   getCategoryRegister,
   invalidateCategoryRegisterCache,
+  parseCategoryRegisterRows,
   setCategoryRegisterCache,
 } from "@/lib/fleet/category-register";
 import {
   parseKasuluFleetSheet,
   type ParsedKasuluFleetRow,
 } from "@/lib/google-sheets/parse";
+import { clearDashboardAggregateCache } from "@/lib/google-sheets/dashboard-cache";
+import { clearUtilizationAggregateCache } from "@/lib/google-sheets/utilization-cache";
 import type {
   ParsedSpeedingRow,
   ParsedUnitLatestRow,
 } from "@/lib/wialon/parse-report";
 
-const CACHE_TTL_MS = 300_000;
+/** Fresh TTL — serve without re-fetching Google Sheets. */
+const CACHE_TTL_MS = 600_000;
+/** Stale TTL — return cached data immediately while refreshing in the background. */
+const STALE_TTL_MS = 1_800_000;
 
 export type FleetDataset = {
   rows: ParsedKasuluFleetRow[];
@@ -46,12 +52,19 @@ async function loadFromSheet(): Promise<FleetDataset> {
   }
 
   const fleetRange = googleSheetsConfig.ranges.fleet;
+  const registerRange = googleSheetsConfig.registerRange?.trim();
+  const ranges = registerRange ? [fleetRange, registerRange] : [fleetRange];
 
-  const [rawRows, unitIds, categoryRegister] = await Promise.all([
-    fetchSheetRange(fleetRange),
+  const [sheetData, unitIds] = await Promise.all([
+    fetchSheetRanges(ranges),
     loadUnitIdMap(),
-    getCategoryRegister(),
   ]);
+
+  const rawRows = sheetData.get(fleetRange) ?? [];
+
+  const categoryRegister = registerRange
+    ? parseCategoryRegisterRows(sheetData.get(registerRange) ?? [])
+    : await getCategoryRegister();
 
   if (categoryRegister.size > 0) {
     setCategoryRegisterCache(categoryRegister);
@@ -68,10 +81,29 @@ async function loadFromSheet(): Promise<FleetDataset> {
   return { rows, unitIds, categoryRegister, fetchedAt: Date.now() };
 }
 
-/** Parsed fleet rows from Google Sheets — shared cache, ~90s TTL. */
+/** Parsed fleet rows from Google Sheets — shared cache with stale-while-revalidate. */
 export async function getFleetDataset(): Promise<FleetDataset> {
-  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
+  const now = Date.now();
+
+  if (cache && now - cache.fetchedAt < CACHE_TTL_MS) {
     return cache;
+  }
+
+  const staleCache =
+    cache && now - cache.fetchedAt < STALE_TTL_MS ? cache : null;
+
+  if (staleCache && !loadPromise) {
+    loadPromise = loadFromSheet()
+      .then((dataset) => {
+        cache = dataset;
+        clearDashboardAggregateCache();
+        clearUtilizationAggregateCache();
+        return dataset;
+      })
+      .finally(() => {
+        loadPromise = null;
+      });
+    return staleCache;
   }
 
   if (!loadPromise) {
@@ -120,4 +152,6 @@ export function prefetchFleetDataset(): void {
 export function invalidateFleetDatasetCache(): void {
   cache = null;
   invalidateCategoryRegisterCache();
+  clearDashboardAggregateCache();
+  clearUtilizationAggregateCache();
 }

@@ -56,6 +56,14 @@ export type DashboardBundle = {
   fetchedAt: string;
   /** Which upstream source produced this bundle */
   dataSource?: "google_sheets" | "wialon";
+  /** Sheet min/max/default range — avoids a separate date-range round trip. */
+  sheetDateRange?: {
+    minDate: string;
+    maxDate: string;
+    defaultFrom: string;
+    defaultTo: string;
+    rowCount: number;
+  };
 };
 
 export type KpiSummary = {

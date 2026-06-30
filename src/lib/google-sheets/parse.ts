@@ -51,6 +51,24 @@ export function parseSheetDate(value: string): Date | null {
     return new Date(base.getTime() + offsetMs);
   }
 
+  // dd-MM-yyyy or dd-MM-yyyy HH:mm:ss
+  const dash = trimmed.match(
+    /^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+  if (dash) {
+    const day = Number(dash[1]);
+    const month = Number(dash[2]);
+    const year = Number(dash[3]);
+    if (!dash[4]) {
+      return darDayToDate({ year, month, day });
+    }
+    const base = darDayToDate({ year, month, day });
+    const offsetMs =
+      (Number(dash[4]) * 3600 + Number(dash[5]) * 60 + Number(dash[6] ?? 0)) *
+      1000;
+    return new Date(base.getTime() + offsetMs);
+  }
+
   // dd.MM.yyyy HH:mm:ss
   const dot = trimmed.match(
     /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}):(\d{2}))?$/

@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
 import { useSession } from "next-auth/react";
 import { cn, defaultViolationsFromIso } from "@/lib/utils";
+import { presetReportingRange, normalizeReportingRange } from "@/lib/google-sheets/reporting-date-range";
+import { fetchDashboard } from "@/lib/api/fleet-fetch";
 import { FleetDashboard } from "@/components/dashboard/fleet-dashboard";
 import { AnalysisWindowBar } from "@/components/layout/analysis-window-bar";
 import { CategoryFilterBar } from "@/components/layout/category-filter-bar";
@@ -150,28 +152,27 @@ function TabPane({
   );
 }
 
+function createInitialAnalysisRange() {
+  return presetReportingRange("7d", new Date().toISOString());
+}
+
 export function AppShell() {
   const queryClient = useQueryClient();
   const { data: session, status } = useSession();
   const { data: sheetDateRange } = useSheetDateRange();
+  const initialRange = useMemo(() => createInitialAnalysisRange(), []);
   const [view, setView] = useState<NavView>("dashboard");
   const [visitedTabs, setVisitedTabs] = useState<Set<NavView>>(
     () => new Set(["dashboard"])
   );
-  const [from, setFrom] = useState<string | null>(null);
-  const [to, setTo] = useState<string | null>(null);
+  const [from, setFrom] = useState<string | null>(initialRange.from);
+  const [to, setTo] = useState<string | null>(initialRange.to);
   const [violationsUseCustomRange, setViolationsUseCustomRange] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    if (!sheetDateRange || (from != null && to != null)) return;
-    setFrom(sheetDateRange.defaultFrom);
-    setTo(sheetDateRange.defaultTo);
-  }, [sheetDateRange, from, to]);
-
-  const analysisFrom = from ?? sheetDateRange?.defaultFrom ?? "";
-  const analysisTo = to ?? sheetDateRange?.defaultTo ?? "";
+  const analysisFrom = from ?? initialRange.from;
+  const analysisTo = to ?? initialRange.to;
   const rangeReady = Boolean(analysisFrom && analysisTo);
 
   const driverIncidentsFrom = useMemo(() => {
@@ -189,6 +190,14 @@ export function AppShell() {
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
+      if (rangeReady) {
+        const range = normalizeReportingRange(analysisFrom, analysisTo);
+        await queryClient.fetchQuery({
+          queryKey: fleetQueryKeys.dashboard(range.fromIso, range.toIso),
+          queryFn: () =>
+            fetchDashboard(analysisFrom, analysisTo, { refresh: true }),
+        });
+      }
       await queryClient.invalidateQueries();
       if (rangeReady) {
         prefetchFleetQueries(queryClient, analysisFrom, analysisTo);

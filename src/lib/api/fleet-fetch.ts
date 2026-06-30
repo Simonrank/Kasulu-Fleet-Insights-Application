@@ -26,12 +26,16 @@ export async function fetchSheetDateRange(): Promise<SheetReportingDateRange> {
 
 export async function fetchDashboard(
   from: string,
-  to: string
+  to: string,
+  options?: { refresh?: boolean }
 ): Promise<DashboardBundle> {
   const range = normalizeReportingRange(from, to);
-  const res = await fetch(
-    `/api/dashboard?${buildQuery(range.fromIso, range.toIso)}`
-  );
+  const params = new URLSearchParams({
+    from: range.fromIso,
+    to: range.toIso,
+  });
+  if (options?.refresh) params.set("refresh", "1");
+  const res = await fetch(`/api/dashboard?${params}`);
   return readJson(res, "Failed to load dashboard");
 }
 

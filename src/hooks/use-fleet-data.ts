@@ -24,7 +24,7 @@ import {
 import { fleetQueryKeys } from "@/lib/api/query-keys";
 import { normalizeReportingRange } from "@/lib/google-sheets/reporting-date-range";
 
-const SHEET_STALE_MS = 300_000;
+const SHEET_STALE_MS = 600_000;
 const TELEMATICS_STALE_MS = 5 * 60_000;
 
 /** Default reporting window from the fleet sheet `date` column. */
@@ -33,6 +33,8 @@ export function useSheetDateRange() {
     queryKey: fleetQueryKeys.sheetDateRange(),
     queryFn: fetchSheetDateRange,
     staleTime: SHEET_STALE_MS,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -97,10 +99,20 @@ export function prefetchDriverIncidentsQuery(
 
 /** Dashboard KPIs, thefts, fleet, and utilization — one Google Sheets request. */
 export function useDashboard(from: string, to: string) {
+  const queryClient = useQueryClient();
   const range = normalizeReportingRange(from, to);
   return useQuery<DashboardBundle>({
     queryKey: fleetQueryKeys.dashboard(range.fromIso, range.toIso),
-    queryFn: () => fetchDashboard(from, to),
+    queryFn: async () => {
+      const data = await fetchDashboard(from, to);
+      if (data.sheetDateRange) {
+        queryClient.setQueryData(
+          fleetQueryKeys.sheetDateRange(),
+          data.sheetDateRange
+        );
+      }
+      return data;
+    },
     enabled: Boolean(from && to),
     staleTime: SHEET_STALE_MS,
     gcTime: 10 * 60_000,

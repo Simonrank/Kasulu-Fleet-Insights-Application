@@ -1,5 +1,6 @@
 import type { DashboardBundle } from "@/lib/types";
 import { isGoogleSheetsConfigured } from "@/lib/config/env";
+import { buildSheetReportingDateRange } from "@/lib/google-sheets/date-range";
 import { getDashboardBundle } from "@/lib/google-sheets/dashboard-cache";
 import { getFleetDataset } from "@/lib/google-sheets/fleet-dataset";
 import { getUtilizationBundle } from "@/lib/google-sheets/utilization-cache";
@@ -19,6 +20,7 @@ export async function loadDashboardBundle(
   const dataset = await getFleetDataset();
   const bundle = getDashboardBundle(dataset, from, to);
   const utilization = getUtilizationBundle(dataset, from, to);
+  const sheetDateRange = buildSheetReportingDateRange(dataset.rows);
 
   return {
     ...bundle,
@@ -26,5 +28,6 @@ export async function loadDashboardBundle(
     speedViolations: emptySpeedViolationsSummary(),
     unitLatest: [],
     dataSource: "google_sheets",
+    sheetDateRange: sheetDateRange ?? undefined,
   };
 }

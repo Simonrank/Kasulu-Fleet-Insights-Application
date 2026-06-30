@@ -31,6 +31,14 @@ export async function GET(request: Request) {
     }
 
     const { searchParams } = new URL(request.url);
+    const forceRefresh = searchParams.get("refresh") === "1";
+    if (forceRefresh) {
+      const { invalidateFleetDatasetCache } = await import(
+        "@/lib/google-sheets/fleet-dataset"
+      );
+      invalidateFleetDatasetCache();
+    }
+
     const { from, to } = parseReportingDateRange(
       searchParams.get("from"),
       searchParams.get("to")
