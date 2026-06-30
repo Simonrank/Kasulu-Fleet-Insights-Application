@@ -14,6 +14,8 @@ type Props = {
   summaries: ViolationTypeSummary[];
   selectedType: string | null;
   onSelect: (type: string) => void;
+  /** When false, hides Total violations and Total violation time cards. */
+  showSummaryTotals?: boolean;
 };
 
 function gridColsClass(cardCount: number): string {
@@ -169,15 +171,17 @@ export function ViolationOverviewCards({
   summaries,
   selectedType,
   onSelect,
+  showSummaryTotals = true,
 }: Props) {
-  const cardCount = 2 + summaries.length;
+  const cardCount = (showSummaryTotals ? 2 : 0) + summaries.length;
   const summaryAccent = colorFromKey("violations_summary");
 
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
       <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
-        Violations overview · speed bands · power disconnection · click a card to
-        filter
+        {showSummaryTotals
+          ? "Violations overview · speed bands · power disconnection · click a card to filter"
+          : "Speed bands · power disconnection · click a card to view vehicles"}
       </p>
       <div
         className={cn(
@@ -185,32 +189,36 @@ export function ViolationOverviewCards({
           gridColsClass(cardCount)
         )}
       >
-        <StatCard
-          title="Total violations"
-          value={String(totalCount)}
-          detail="events"
-          icon={
-            <Layers
-              className="h-4 w-4"
-              style={{ color: summaryAccent }}
-              strokeWidth={2.25}
+        {showSummaryTotals && (
+          <>
+            <StatCard
+              title="Total violations"
+              value={String(totalCount)}
+              detail="events"
+              icon={
+                <Layers
+                  className="h-4 w-4"
+                  style={{ color: summaryAccent }}
+                  strokeWidth={2.25}
+                />
+              }
+              accentColor={summaryAccent}
             />
-          }
-          accentColor={summaryAccent}
-        />
-        <StatCard
-          title="Total violation time"
-          value={formatDurationHms(totalDurationSeconds)}
-          detail="total time"
-          icon={
-            <Clock
-              className="h-4 w-4"
-              style={{ color: summaryAccent }}
-              strokeWidth={2.25}
+            <StatCard
+              title="Total violation time"
+              value={formatDurationHms(totalDurationSeconds)}
+              detail="total time"
+              icon={
+                <Clock
+                  className="h-4 w-4"
+                  style={{ color: summaryAccent }}
+                  strokeWidth={2.25}
+                />
+              }
+              accentColor={summaryAccent}
             />
-          }
-          accentColor={summaryAccent}
-        />
+          </>
+        )}
         {summaries.map((item, index) => (
           <FilterCard
             key={item.type}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { format } from "date-fns";
 import { ArrowLeft, FileSpreadsheet, Gauge, MapPin, ShieldAlert, Fuel } from "lucide-react";
 import { useDriverIncidents, useFuelThefts, useLiveUnitLocations, useUtilization } from "@/hooks/use-fleet-data";
 import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
@@ -15,11 +14,11 @@ import {
   filterUtilizationUnits,
   UtilizationPerUnitTable,
 } from "@/components/dashboard/utilization-per-unit-table";
+import { ViolationsReportContent } from "@/components/dashboard/violations-report-content";
 import { Button } from "@/components/ui/button";
 import { fetchAndDownloadReport, type ExportFormat, type ExportReportType } from "@/lib/export/csv";
-import { formatNumber } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import type { DriverIncidentRow, FuelTheftsResponse, UnitLatestRow } from "@/lib/types";
+import type { UnitLatestRow } from "@/lib/types";
 import { downloadLocationsReport } from "@/lib/export/location-report-client";
 
 type ReportDetailPanelProps = {
@@ -30,36 +29,6 @@ type ReportDetailPanelProps = {
   onClose: () => void;
 };
 
-const REPORT_META: Record<
-  ExportReportType,
-  { title: string; description: string; icon: React.ElementType }
-> = {
-  fuel: {
-    title: "Fleet Fuel & Theft Summary",
-    description:
-      "Per-vehicle fuel consumption, theft volumes, and efficiency for the selected period.",
-    icon: Fuel,
-  },
-  violations: {
-    title: "Violations report",
-    description:
-      "Where each violation occurred and how long it lasted — fuel thefts and driver incidents.",
-    icon: ShieldAlert,
-  },
-  locations: {
-    title: "Current asset location",
-    description:
-      "Live ControlRoom report — asset, last message, location, and speed.",
-    icon: MapPin,
-  },
-  utilization: {
-    title: "Utilization report",
-    description:
-      "Per-vehicle distance, engine hours, fuel consumption, and violations for the selected period.",
-    icon: Gauge,
-  },
-};
-
 export function ReportDetailPanel({
   type,
   from,
@@ -67,9 +36,6 @@ export function ReportDetailPanel({
   periodLabel,
   onClose,
 }: ReportDetailPanelProps) {
-  const meta = REPORT_META[type];
-  const Icon = meta.icon;
-
   const fuelQuery = useFuelThefts(from, to, "all");
   const utilizationQuery = useUtilization(from, to);
   const incidentsQuery = useDriverIncidents(from, to);
@@ -113,8 +79,7 @@ export function ReportDetailPanel({
         ? (utilizationQuery.isLoading && !utilizationQuery.data) ||
           (utilizationQuery.isFetching && !utilizationQuery.data)
       : type === "violations"
-        ? (fuelQuery.isLoading && !fuelQuery.data) ||
-          (incidentsQuery.isLoading && !incidentsQuery.data)
+        ? incidentsQuery.isLoading && !incidentsQuery.data
         : liveLocationsQuery.isLoading && !liveLocationsQuery.data;
 
   if (type === "utilization") {
@@ -201,6 +166,35 @@ export function ReportDetailPanel({
     );
   }
 
+  if (type === "violations") {
+    return (
+      <div className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <ExportButtons
+            type={type}
+            from={from}
+            to={to}
+            disabled={!incidentsQuery.data}
+          />
+        </div>
+
+        <p className="text-sm text-muted-foreground">Period: {periodLabel}</p>
+
+        {incidentsQuery.isFetching && incidentsQuery.data && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Updating period…
+          </p>
+        )}
+
+        <ViolationsReportContent from={from} to={to} />
+      </div>
+    );
+  }
+
   if (type === "locations") {
     return (
       <div className="space-y-4">
@@ -234,44 +228,7 @@ export function ReportDetailPanel({
     );
   }
 
-  return (
-    <div className="rounded-xl border border-border bg-card shadow-sm">
-      <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
-        <div className="flex items-start gap-4">
-          <Button variant="ghost" size="sm" onClick={onClose} className="mt-0.5 shrink-0">
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-muted p-2">
-                <Icon className="h-5 w-5 text-[#0d9488]" />
-              </div>
-              <h2 className="text-xl font-semibold">{meta.title}</h2>
-            </div>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              {meta.description}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Period: {periodLabel}
-            </p>
-          </div>
-        </div>
-        <ExportButtons type={type} from={from} to={to} />
-      </div>
-
-      <div className="px-6 py-5">
-        {isLoading ? (
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-        ) : type === "violations" && fuelQuery.data && incidentsQuery.data ? (
-          <ViolationsPreview
-            fuelEvents={fuelQuery.data.events}
-            incidents={incidentsQuery.data.incidents}
-          />
-        ) : null}
-      </div>
-    </div>
-  );
+  return null;
 }
 
 function ExportButtons({
@@ -330,107 +287,6 @@ function ExportButtons({
   );
 }
 
-function ViolationsPreview({
-  fuelEvents,
-  incidents,
-}: {
-  fuelEvents: FuelTheftsResponse["events"];
-  incidents: DriverIncidentRow[];
-}) {
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Fuel theft events" value={String(fuelEvents.length)} />
-        <Stat label="Driver incidents" value={String(incidents.length)} />
-        <Stat label="Total violations" value={String(fuelEvents.length + incidents.length)} />
-      </div>
-
-      {fuelEvents.length > 0 && (
-        <PreviewTable
-          title="Fuel theft violations"
-          headers={["Date", "Unit", "Volume", "Duration", "Location"]}
-          rows={fuelEvents.slice(0, 5).map((e) => [
-            format(new Date(e.occurredAt), "dd MMM yyyy HH:mm"),
-            e.unitName,
-            `${formatNumber(e.volumeLiters, 1)} L`,
-            e.durationMinutes != null ? `${e.durationMinutes} min` : "—",
-            e.locationName,
-          ])}
-        />
-      )}
-
-      {incidents.length > 0 && (
-        <PreviewTable
-          title="Driver behaviour violations"
-          headers={["Date", "Unit", "Driver", "Type", "Severity"]}
-          rows={incidents.slice(0, 5).map((i) => [
-            format(new Date(i.occurredAt), "dd MMM yyyy HH:mm"),
-            i.unitName,
-            i.driverName,
-            i.incidentType.replace(/_/g, " "),
-            i.severity,
-          ])}
-        />
-      )}
-
-      {fuelEvents.length === 0 && incidents.length === 0 && (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          No violations recorded for this period.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function PreviewTable({
-  title,
-  headers,
-  rows,
-}: {
-  title: string;
-  headers: string[];
-  rows: (string | null)[][];
-}) {
-  return (
-    <div>
-      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-left text-muted-foreground">
-              {headers.map((h) => (
-                <th key={h} className="px-4 py-2.5 font-medium">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-border/60 last:border-0">
-                {row.map((cell, j) => (
-                  <td key={j} className="px-4 py-2.5">
-                    {cell ?? "—"}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 export const REPORT_CARDS: {
   type: ExportReportType;
   title: string;
@@ -453,7 +309,8 @@ export const REPORT_CARDS: {
   {
     type: "violations",
     title: "Violations report",
-    description: "Where each violation occurred and how long it lasted.",
+    description:
+      "Speed bands, power disconnection, and vehicle event details with export.",
     icon: ShieldAlert,
     cardClass: "bg-violet-50/80 border-violet-100",
     iconWrapClass: "bg-violet-100",

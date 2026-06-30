@@ -20,12 +20,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       if (typeof token.id === "string") {
-        const dbUser = await findUserById(token.id);
-        if (dbUser?.isActive) {
-          token.role = dbUser.role;
-          token.permissions = dbUser.permissions;
-          token.name = dbUser.name;
-          token.email = dbUser.email;
+        try {
+          const dbUser = await findUserById(token.id);
+          if (dbUser?.isActive) {
+            token.role = dbUser.role;
+            token.permissions = dbUser.permissions;
+            token.name = dbUser.name;
+            token.email = dbUser.email;
+          }
+        } catch (error) {
+          console.error("[auth] Failed to refresh user from database:", error);
         }
       }
 

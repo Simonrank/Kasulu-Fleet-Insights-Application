@@ -27,7 +27,7 @@ export function Providers({ children, session }: Props) {
   );
 
   return (
-    <SessionProvider session={session}>
+    <SessionProvider session={session} refetchOnWindowFocus={false}>
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </SessionProvider>
   );
