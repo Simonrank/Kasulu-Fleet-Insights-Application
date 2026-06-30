@@ -150,6 +150,91 @@ export function parseWialonFleetReportRow(
   };
 }
 
+export type ParsedMobileStatusRow = {
+  asset: string;
+  lastMessageAt: Date | null;
+  location: string | null;
+  lat: number | null;
+  lon: number | null;
+  speedKmh: number | null;
+};
+
+/** Wialon "Current Mobile Status - ControlRoom" table row. */
+export function parseWialonMobileStatusRow(
+  headers: string[],
+  row: string[]
+): ParsedMobileStatusRow | null {
+  const map = headerIndexMap(headers);
+
+  const asset = cell(
+    row,
+    resolveColumn(map, [
+      "asset",
+      "unit",
+      "unit_name",
+      "name",
+      "object",
+      "registration",
+      "machine_id",
+      "machine id",
+      "grouping",
+    ])
+  );
+
+  if (!asset) return null;
+
+  const lastMessageRaw = cell(
+    row,
+    resolveColumn(map, [
+      "last_message",
+      "last message",
+      "message time",
+      "time",
+      "last coordinates time",
+      "time received",
+    ])
+  );
+
+  const locationRaw = cell(
+    row,
+    resolveColumn(map, [
+      "location",
+      "current_location",
+      "current location",
+      "address",
+      "coordinates",
+      "position",
+    ])
+  );
+
+  const coords = parseCoordinatePair(locationRaw);
+  const speedRaw = cell(row, resolveColumn(map, ["speed", "speed (km/h)"]));
+  const speedKmh = cellNumber(row, resolveColumn(map, ["speed", "speed (km/h)"]));
+  const parsedSpeed =
+    speedKmh > 0
+      ? speedKmh
+      : (() => {
+          const match = speedRaw.match(/([\d.]+)/);
+          return match ? Number(match[1]) : 0;
+        })();
+
+  const location =
+    locationRaw && !coords
+      ? locationRaw
+      : coords
+        ? `${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`
+        : null;
+
+  return {
+    asset,
+    lastMessageAt: parseSheetDate(lastMessageRaw),
+    location,
+    lat: coords?.lat ?? null,
+    lon: coords?.lon ?? null,
+    speedKmh: parsedSpeed > 0 ? parsedSpeed : null,
+  };
+}
+
 export type ParsedUnitLatestRow = {
   machineId: string;
   reg: string;
@@ -180,6 +265,7 @@ export function parseWialonUnitLatestRow(
   const machineId = cell(
     row,
     resolveColumn(map, [
+      "asset",
       "unit",
       "unit_name",
       "name",

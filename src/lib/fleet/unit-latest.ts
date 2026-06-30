@@ -33,8 +33,7 @@ export function buildUnitLatestRows(
       );
 
     const reg = machineId.split("—")[0]?.trim() ?? machineId;
-    const lastMessageAt =
-      wialon?.lastMessageAt ?? latest.lastMessageAt ?? null;
+    const lastMessageAt = wialon?.lastMessageAt ?? null;
 
     rows.push({
       unitId: resolveUnitId(machineId, unitIds),

@@ -7,6 +7,7 @@ import {
 import {
   exportFilename,
   getReportRows,
+  buildLocationsPdf,
   reportTitle,
   type ExportReportType,
 } from "@/lib/services/report-exports";
@@ -51,6 +52,36 @@ export async function GET(request: Request) {
 
     const from = fromParam ? new Date(fromParam) : new Date();
     const to = toParam ? new Date(toParam) : new Date();
+
+    if (type === "locations") {
+      if (format === "pdf") {
+        const buffer = await buildLocationsPdf();
+        const filename = exportFilename(type, from, to, "pdf");
+        return new NextResponse(new Uint8Array(buffer), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="${filename}"`,
+          },
+        });
+      }
+
+      const rows = await getReportRows(type, from, to);
+      const { buffer, contentType } = buildExportBuffer(
+        format,
+        rows,
+        reportTitle(type)
+      );
+      const ext = exportExtension(format);
+      const filename = exportFilename(type, from, to, ext);
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Content-Disposition": `attachment; filename="${filename}"`,
+        },
+      });
+    }
 
     return await withSheetData(async () => {
       const rows = await getReportRows(type, from, to);

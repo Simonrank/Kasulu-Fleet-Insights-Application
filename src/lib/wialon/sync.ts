@@ -13,6 +13,7 @@ import {
   unixToDate,
 } from "@/lib/wialon/normalize";
 import { wialonConfig } from "@/lib/config/env";
+import { withWialonSessionLock } from "@/lib/wialon/session-lock";
 
 const WIALON_ONLINE_THRESHOLD_MS =
   Number(process.env.ONLINE_THRESHOLD_MINUTES ?? "30") * 60 * 1000;
@@ -25,107 +26,109 @@ export type SyncResult = {
 };
 
 export async function syncFromWialon(): Promise<SyncResult> {
-  const client = createWialonClient();
+  return withWialonSessionLock(async () => {
+    const client = createWialonClient();
 
-  const [log] = await db
-    .insert(syncLogs)
-    .values({ status: "running" })
-    .returning();
+    const [log] = await db
+      .insert(syncLogs)
+      .values({ status: "running" })
+      .returning();
 
-  if (!client) {
-    await db
-      .update(syncLogs)
-      .set({
-        status: "failed",
-        errorMessage: "WIALON_TOKEN not configured",
-        finishedAt: new Date(),
-      })
-      .where(eq(syncLogs.id, log.id));
-
-    return {
-      success: false,
-      unitsSynced: 0,
-      eventsSynced: 0,
-      message: "WIALON_TOKEN not configured",
-    };
-  }
-
-  try {
-    const wialonUnits = await client.getUnits();
-    let eventsSynced = 0;
-    const now = Date.now();
-
-    for (const wUnit of wialonUnits) {
-      const lastMsgTime = wUnit.lmsg?.t ?? wUnit.pos?.t;
-      const lastMessageAt = unixToDate(lastMsgTime);
-      const isOnline =
-        !!lastMessageAt && now - lastMessageAt.getTime() <= WIALON_ONLINE_THRESHOLD_MS;
-
-      const [unit] = await db
-        .insert(units)
-        .values({
-          wialonId: wUnit.id,
-          name: wUnit.nm,
-          lastMessageAt,
-          lastLat: wUnit.pos?.y,
-          lastLon: wUnit.pos?.x,
-          isOnline,
-          updatedAt: new Date(),
+    if (!client) {
+      await db
+        .update(syncLogs)
+        .set({
+          status: "failed",
+          errorMessage: "WIALON_TOKEN not configured",
+          finishedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: units.wialonId,
-          set: {
+        .where(eq(syncLogs.id, log.id));
+
+      return {
+        success: false,
+        unitsSynced: 0,
+        eventsSynced: 0,
+        message: "WIALON_TOKEN not configured",
+      };
+    }
+
+    try {
+      const wialonUnits = await client.getUnits();
+      let eventsSynced = 0;
+      const now = Date.now();
+
+      for (const wUnit of wialonUnits) {
+        const lastMsgTime = wUnit.lmsg?.t ?? wUnit.pos?.t;
+        const lastMessageAt = unixToDate(lastMsgTime);
+        const isOnline =
+          !!lastMessageAt &&
+          now - lastMessageAt.getTime() <= WIALON_ONLINE_THRESHOLD_MS;
+
+        const [unit] = await db
+          .insert(units)
+          .values({
+            wialonId: wUnit.id,
             name: wUnit.nm,
             lastMessageAt,
             lastLat: wUnit.pos?.y,
             lastLon: wUnit.pos?.x,
             isOnline,
             updatedAt: new Date(),
-          },
+          })
+          .onConflictDoUpdate({
+            target: units.wialonId,
+            set: {
+              name: wUnit.nm,
+              lastMessageAt,
+              lastLat: wUnit.pos?.y,
+              lastLon: wUnit.pos?.x,
+              isOnline,
+              updatedAt: new Date(),
+            },
+          })
+          .returning();
+
+        eventsSynced += await syncUnitReports(client, unit.id, wUnit.id);
+      }
+
+      await client.logout();
+
+      await db
+        .update(syncLogs)
+        .set({
+          status: "success",
+          unitsSynced: wialonUnits.length,
+          eventsSynced,
+          finishedAt: new Date(),
         })
-        .returning();
+        .where(eq(syncLogs.id, log.id));
 
-      // Report sync requires Wialon report template IDs — extend when provided
-      eventsSynced += await syncUnitReports(client, unit.id, wUnit.id);
-    }
-
-    await client.logout();
-
-    await db
-      .update(syncLogs)
-      .set({
-        status: "success",
+      return {
+        success: true,
         unitsSynced: wialonUnits.length,
         eventsSynced,
-        finishedAt: new Date(),
-      })
-      .where(eq(syncLogs.id, log.id));
+        message: `Synced ${wialonUnits.length} units`,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
 
-    return {
-      success: true,
-      unitsSynced: wialonUnits.length,
-      eventsSynced,
-      message: `Synced ${wialonUnits.length} units`,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+      await db
+        .update(syncLogs)
+        .set({
+          status: "failed",
+          errorMessage: message,
+          finishedAt: new Date(),
+        })
+        .where(eq(syncLogs.id, log.id));
 
-    await db
-      .update(syncLogs)
-      .set({
-        status: "failed",
-        errorMessage: message,
-        finishedAt: new Date(),
-      })
-      .where(eq(syncLogs.id, log.id));
-
-    return {
-      success: false,
-      unitsSynced: 0,
-      eventsSynced: 0,
-      message,
-    };
-  }
+      return {
+        success: false,
+        unitsSynced: 0,
+        eventsSynced: 0,
+        message,
+      };
+    }
+  });
 }
 
 async function syncUnitReports(

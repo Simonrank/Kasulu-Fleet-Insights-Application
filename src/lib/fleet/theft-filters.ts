@@ -2,6 +2,15 @@ import type { DurationBand, FuelTheftDetail, TheftFilter } from "@/lib/types";
 
 export type VehicleTypeFilter = "all" | string;
 
+export function matchesCategoryFilter(
+  category: string | null | undefined,
+  filter: VehicleTypeFilter
+): boolean {
+  if (filter === "all") return true;
+  if (!category || category === "—") return false;
+  return category === filter;
+}
+
 export function buildCategoryFilterOptions(
   units: { category: string }[]
 ): { value: VehicleTypeFilter; label: string }[] {

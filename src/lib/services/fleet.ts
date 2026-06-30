@@ -2,9 +2,17 @@ import { eq, and, gte, lte, desc, sum } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { units, dailyUnitMetrics, fuelEvents, driverIncidents } from "@/lib/db/schema";
 import {
-  categoryLabel,
-  resolveFleetCategory,
+  fleetCategoryKey,
+  fleetCategoryLabel,
+  tallyFleetByCategory,
+  tallyFleetStatus,
 } from "@/lib/fleet/categories";
+import {
+  connectivityBand,
+  connectivityBandDetail,
+  connectivityBandLabel,
+  isUnitUpdating,
+} from "@/lib/fleet/connectivity";
 import { incidentTypeLabel } from "@/lib/fleet/violations-model";
 import type { FleetSummary, UnitProblemsResponse, UnitProblem } from "@/lib/types";
 import { KPI_TARGETS } from "@/lib/utils";
@@ -12,35 +20,25 @@ import { KPI_TARGETS } from "@/lib/utils";
 export async function getFleetSummary(): Promise<FleetSummary> {
   const rows = await db.select().from(units).orderBy(units.name);
 
-  let heavyMachines = 0;
-  let lightVehicles = 0;
+  const unitRows = rows.map((unit) => mapUnitRow(unit));
+
   let updating = 0;
   let nonUpdating = 0;
-  let active = 0;
-  let inactive = 0;
-  let maintenance = 0;
-
-  const unitRows = rows.map((unit) => mapUnitRow(unit));
 
   for (const row of unitRows) {
     if (row.isUpdating) updating++;
     else nonUpdating++;
-
-    if (row.status === "active") active++;
-    else if (row.status === "inactive") inactive++;
-    else if (row.status === "maintenance") maintenance++;
   }
+
+  const statusCounts = tallyFleetStatus(unitRows);
 
   return {
     summary: {
       total: rows.length,
-      heavyMachines,
-      lightVehicles,
+      byCategory: tallyFleetByCategory(unitRows),
       updating,
       nonUpdating,
-      active,
-      inactive,
-      maintenance,
+      ...statusCounts,
     },
     units: unitRows,
   };
@@ -49,10 +47,13 @@ export async function getFleetSummary(): Promise<FleetSummary> {
 function mapUnitRow(
   unit: typeof units.$inferSelect
 ): FleetSummary["units"][number] {
-  const categoryKey = resolveFleetCategory(unit.vehicleType, unit.vehicleCategory);
-  const categoryDisplay = unit.vehicleCategory?.trim()
-    ? categoryLabel(categoryKey)
-    : "—";
+  const categoryDisplay = fleetCategoryLabel(
+    unit.vehicleCategory,
+    unit.vehicleType
+  );
+
+  const band = connectivityBand(unit.lastMessageAt);
+  const updating = isUnitUpdating(unit.lastMessageAt);
 
   return {
     id: unit.id,
@@ -61,11 +62,12 @@ function mapUnitRow(
     plateNumber: unit.plateNumber,
     vehicleType: unit.vehicleType,
     category: categoryDisplay,
-    categoryKey: categoryDisplay === "—" ? null : categoryDisplay,
+    categoryKey: fleetCategoryKey(unit.vehicleCategory, unit.vehicleType),
     driverName: unit.driverName,
     status: unit.status,
-    isOnline: unit.isOnline,
-    isUpdating: unit.isOnline,
+    isOnline: updating,
+    isUpdating: updating,
+    connectivityBand: band,
     lastMessageAt: unit.lastMessageAt?.toISOString() ?? null,
     lastLat: unit.lastLat,
     lastLon: unit.lastLon,
@@ -87,14 +89,22 @@ export async function getUnitProblems(
   const problems: UnitProblem[] = [];
 
   if (!unitRow.isUpdating) {
+    const severity =
+      unitRow.connectivityBand === "hours_48_plus" ||
+      unitRow.connectivityBand === "unknown"
+        ? "critical"
+        : unitRow.connectivityBand === "hours_24_48"
+          ? "high"
+          : "medium";
+
     problems.push({
       id: `connectivity-${unit.id}`,
       category: "connectivity",
-      severity: "high",
-      title: "Non-updating telemetry",
+      severity,
+      title: connectivityBandLabel(unitRow.connectivityBand),
       description: unit.lastMessageAt
-        ? `No telemetry in the last 30 minutes. Last update: ${unit.lastMessageAt.toISOString()}`
-        : "No telemetry messages received from this unit",
+        ? `${connectivityBandDetail(unitRow.connectivityBand)}. Last update: ${unit.lastMessageAt.toISOString()}`
+        : connectivityBandDetail(unitRow.connectivityBand),
       occurredAt: unit.lastMessageAt?.toISOString() ?? null,
     });
   }

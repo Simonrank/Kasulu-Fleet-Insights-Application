@@ -1,7 +1,10 @@
 import { getFleetDataset } from "@/lib/google-sheets/fleet-dataset";
 import { getUtilizationBundle } from "@/lib/google-sheets/utilization-cache";
+import { resolveAssetCategory } from "@/lib/fleet/asset-names";
+import { aggregateUtilizationFleet } from "@/lib/fleet/fleet-metrics-aggregation";
 import type { FleetDataset } from "@/lib/google-sheets/fleet-dataset";
 import type { ParsedKasuluFleetRow } from "@/lib/google-sheets/parse";
+import { rowInDatetimeRange } from "@/lib/google-sheets/period-filter";
 import { buildNaturalBuckets } from "@/lib/data-driven/buckets";
 import type { UtilizationSummary } from "@/lib/types";
 
@@ -21,17 +24,15 @@ function unitDisplayName(machineId: string): string {
   return machineId.split("—")[0]?.trim() ?? machineId;
 }
 
-function inPeriod(row: ParsedKasuluFleetRow, from: Date, to: Date): boolean {
-  return row.date >= from && row.date <= to;
-}
-
 /** Fleet utilization from a parsed sheet dataset — no extra network I/O. */
 export function buildUtilizationFromDataset(
   dataset: FleetDataset,
   from: Date,
   to: Date
 ): UtilizationSummary {
-  const periodRows = dataset.rows.filter((row) => inPeriod(row, from, to));
+  const periodRows = dataset.rows.filter((row) =>
+    rowInDatetimeRange(row.date, from, to)
+  );
   const unitAgg = new Map<string, UnitAgg>();
 
   for (const row of periodRows) {
@@ -42,7 +43,11 @@ export function buildUtilizationFromDataset(
       agg = {
         unitId: dataset.unitIds.get(key) ?? key,
         unitName: unitDisplayName(row.machineId),
-        category: row.category,
+        category: resolveAssetCategory(
+          row.machineId,
+          row.category,
+          dataset.categoryRegister
+        ),
         distanceKm: 0,
         engineHours: 0,
         productiveHours: 0,
@@ -77,13 +82,7 @@ export function buildUtilizationFromDataset(
     }))
     .sort((a, b) => b.distanceKm - a.distanceKm);
 
-  const totalDistanceKm = byUnit.reduce((s, u) => s + u.distanceKm, 0);
-  const totalEngineHours = byUnit.reduce((s, u) => s + u.engineHours, 0);
-  const totalIdleHours = byUnit.reduce((s, u) => s + u.idleHours, 0);
-  const totalProductiveHours = byUnit.reduce(
-    (s, u) => s + u.productiveHours,
-    0
-  );
+  const fleetTotals = aggregateUtilizationFleet(byUnit);
 
   const distanceBuckets = buildNaturalBuckets(
     byUnit.map((u) => u.distanceKm)
@@ -91,12 +90,11 @@ export function buildUtilizationFromDataset(
 
   return {
     fleet: {
-      totalDistanceKm,
-      totalEngineHours,
-      totalProductiveHours,
-      totalIdleHours,
-      avgKmPerEngineHour:
-        totalEngineHours > 0 ? totalDistanceKm / totalEngineHours : 0,
+      totalDistanceKm: fleetTotals.totalDistanceKm,
+      totalEngineHours: fleetTotals.totalEngineHours,
+      totalProductiveHours: fleetTotals.totalProductiveHours,
+      totalIdleHours: fleetTotals.totalIdleHours,
+      avgKmPerEngineHour: fleetTotals.avgKmPerEngineHour,
     },
     byUnit,
     distanceBuckets,

@@ -3,29 +3,24 @@ import { startOfDay, subDays } from "date-fns";
 import { fetchSheetRange } from "@/lib/google-sheets/client";
 import { googleSheetsConfig } from "@/lib/config/env";
 import {
-  headerIndexMap,
-  parseKasuluFleetRow,
+  parseKasuluFleetSheet,
 } from "@/lib/google-sheets/parse";
 
 async function main() {
   const days = Number(process.env.GOOGLE_SHEETS_SYNC_DAYS ?? "30");
   const cutoff = startOfDay(subDays(new Date(), days));
 
-  const rows = await fetchSheetRange(googleSheetsConfig.ranges.fleet);
-  const map = headerIndexMap(rows[0]);
+  const rawRows = await fetchSheetRange(googleSheetsConfig.ranges.fleet);
+  const { rows: parsedRows } = parseKasuluFleetSheet(rawRows);
 
   let inRange = 0;
-  let parsed = 0;
   const machines = new Set<string>();
   const latestByMachine = new Map<
     string,
     { date: Date; lastMessage: string | null }
   >();
 
-  for (const row of rows.slice(1)) {
-    const p = parseKasuluFleetRow(row, map);
-    if (!p) continue;
-    parsed++;
+  for (const p of parsedRows) {
 
     const prev = latestByMachine.get(p.machineId);
     if (!prev || p.date > prev.date) {
@@ -41,8 +36,8 @@ async function main() {
     }
   }
 
-  console.log("Total rows:", rows.length - 1);
-  console.log("Parsed rows:", parsed);
+  console.log("Total raw rows:", rawRows.length - 1);
+  console.log("Parsed rows:", parsedRows.length);
   console.log(`Rows in last ${days} days:`, inRange);
   console.log("Unique machines (in range):", machines.size);
   console.log("Unique machines (all):", latestByMachine.size);

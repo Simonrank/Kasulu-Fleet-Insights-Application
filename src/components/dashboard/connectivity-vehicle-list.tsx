@@ -2,6 +2,12 @@
 
 import { format } from "date-fns";
 import { ChevronRight } from "lucide-react";
+import {
+  connectivityBandLabel,
+  connectivityStaleLabel,
+  matchesConnectivityFilter,
+  type ConnectivityBand,
+} from "@/lib/fleet/connectivity";
 import type { ConnectivityFilter, FleetUnitRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -18,19 +24,18 @@ export function ConnectivityVehicleList({
   onSelectUnit,
   compact = false,
 }: Props) {
-  const filtered =
-    filter === "updating"
-      ? units.filter((u) => u.isUpdating)
-      : filter === "non_updating"
-        ? units.filter((u) => !u.isUpdating)
-        : units;
+  const filtered = units.filter((unit) => matchesConnectivityFilter(unit, filter));
 
   const title =
-    filter === "updating"
-      ? "Updating vehicles"
-      : filter === "non_updating"
-        ? "Non-updating vehicles"
-        : "All vehicles";
+    filter === "non_updating"
+      ? "Non-updating vehicles"
+      : filter === "all"
+        ? "All vehicles"
+        : filter === "updating"
+          ? `${connectivityBandLabel("updating")} vehicles`
+          : filter === "unknown"
+            ? "No last message"
+            : `${connectivityStaleLabel(filter)} vehicles`;
 
   if (filtered.length === 0) {
     return (
@@ -40,7 +45,7 @@ export function ConnectivityVehicleList({
           compact && "py-4 text-xs"
         )}
       >
-        No {filter === "updating" ? "updating" : "non-updating"} vehicles
+        No vehicles in this connectivity band
       </div>
     );
   }

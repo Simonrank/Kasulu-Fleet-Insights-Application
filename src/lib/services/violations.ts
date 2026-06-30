@@ -2,12 +2,14 @@ import { isTelematicsConfigured } from "@/lib/config/env";
 import {
   applyDataDrivenSeverity,
   buildViolationsSummary,
+  isFuelDrainViolation,
   mergeViolationSources,
   speedingsToIncidents,
   wialonViolationsToIncidents,
 } from "@/lib/fleet/violations-model";
 import type { DriverIncidentsResponse } from "@/lib/types";
 import { getTelematicsSnapshot } from "@/lib/telematics/snapshot";
+import { incidentWithinRange } from "@/lib/utils";
 
 /** Driver incidents from live telematics only. */
 export async function getFleetViolations(
@@ -36,6 +38,11 @@ export async function getFleetViolations(
       wialonViolationsToIncidents(snapshot.violations, snapshot.unitIds),
       speedingsToIncidents(snapshot.speedViolations, snapshot.unitIds)
     )
+  ).filter(
+    (row) =>
+      !isFuelDrainViolation(row) &&
+      row.occurredAt != null &&
+      incidentWithinRange(row.occurredAt, from, to)
   );
 
   return {

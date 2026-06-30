@@ -1,63 +1,49 @@
-export type FleetCategory = "heavy_machine" | "light_vehicle";
+/** Category display from source data only — no keyword inference or defaults. */
 
-export const CATEGORY_LABELS: Record<FleetCategory, string> = {
-  heavy_machine: "Heavy Machines",
-  light_vehicle: "Light Vehicles",
-};
-
-const LIGHT_KEYWORDS = [
-  "pickup",
-  "hilux",
-  "suv",
-  "car",
-  "van",
-  "light",
-  "sedan",
-  "ute",
-];
-
-/** Legacy DB values mapped to heavy machines */
-const HEAVY_MACHINE_ALIASES = new Set([
-  "heavy_machine",
-  "machine",
-  "vehicle",
-  "heavy machine",
-  "machines",
-]);
-
-export function resolveFleetCategory(
-  vehicleType?: string | null,
-  vehicleCategory?: string | null
-): FleetCategory {
-  const cat = (vehicleCategory ?? "").toLowerCase().trim();
-
-  if (cat === "light_vehicle" || cat === "light vehicle") {
-    return "light_vehicle";
-  }
-
-  if (HEAVY_MACHINE_ALIASES.has(cat)) {
-    return "heavy_machine";
-  }
-
-  const t = (vehicleType ?? "").toLowerCase();
-  if (LIGHT_KEYWORDS.some((k) => t.includes(k))) {
-    return "light_vehicle";
-  }
-
-  return "heavy_machine";
+export function fleetCategoryLabel(
+  vehicleCategory?: string | null,
+  vehicleType?: string | null
+): string {
+  const raw = (vehicleCategory ?? vehicleType ?? "").trim();
+  return raw || "—";
 }
 
-export function inferVehicleCategory(
-  vehicleType?: string | null,
-  name?: string | null
-): FleetCategory {
-  const combined = `${vehicleType ?? ""} ${name ?? ""}`.toLowerCase();
-  if (LIGHT_KEYWORDS.some((k) => combined.includes(k))) {
-    return "light_vehicle";
-  }
-  return "heavy_machine";
+export function fleetCategoryKey(
+  vehicleCategory?: string | null,
+  vehicleType?: string | null
+): string | null {
+  const label = fleetCategoryLabel(vehicleCategory, vehicleType);
+  return label === "—" ? null : label;
 }
 
-export function categoryLabel(category: FleetCategory): string {
-  return CATEGORY_LABELS[category];
+export function tallyFleetByCategory(
+  units: { category: string }[]
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+
+  for (const unit of units) {
+    const key =
+      unit.category.trim() && unit.category !== "—"
+        ? unit.category.trim()
+        : "Uncategorized";
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+
+  return counts;
+}
+
+export function tallyFleetStatus(
+  units: { status: string }[]
+): { active: number; inactive: number; maintenance: number } {
+  let active = 0;
+  let inactive = 0;
+  let maintenance = 0;
+
+  for (const unit of units) {
+    if (unit.status === "maintenance") maintenance++;
+    else if (unit.status === "inactive") inactive++;
+    else active++;
+  }
+
+  return { active, inactive, maintenance };
 }

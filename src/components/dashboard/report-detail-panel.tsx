@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ArrowLeft, FileSpreadsheet, MapPin, ShieldAlert, Fuel } from "lucide-react";
-import { useDriverIncidents, useFleet, useFuelThefts } from "@/hooks/use-fleet-data";
+import { useDriverIncidents, useFuelThefts, useLiveUnitLocations } from "@/hooks/use-fleet-data";
+import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
+import { CurrentAssetLocationTable } from "@/components/dashboard/current-asset-location-table";
+import {
+  buildFuelSummaryFooter,
+  filterFuelFleetRows,
+  FleetFuelTheftSummaryTable,
+} from "@/components/dashboard/fleet-fuel-theft-summary-table";
 import { Button } from "@/components/ui/button";
 import { fetchAndDownloadReport, type ExportFormat, type ExportReportType } from "@/lib/export/csv";
 import { formatNumber } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import type { DriverIncidentRow, FleetUnitRow, FuelTheftsResponse } from "@/lib/types";
+import type { DriverIncidentRow, FuelTheftsResponse, UnitLatestRow } from "@/lib/types";
+import { downloadLocationsReport } from "@/lib/export/location-report-client";
 
 type ReportDetailPanelProps = {
   type: ExportReportType;
@@ -23,9 +31,9 @@ const REPORT_META: Record<
   { title: string; description: string; icon: React.ElementType }
 > = {
   fuel: {
-    title: "Fuel report",
+    title: "Fleet Fuel & Theft Summary",
     description:
-      "Per-vehicle fuel consumption (km/L), fill-ups, and drains for the selected period.",
+      "Per-vehicle fuel consumption, theft volumes, and efficiency for the selected period.",
     icon: Fuel,
   },
   violations: {
@@ -35,9 +43,9 @@ const REPORT_META: Record<
     icon: ShieldAlert,
   },
   locations: {
-    title: "Vehicle locations report",
+    title: "Current asset location",
     description:
-      "Last known position, connectivity status, and message time per unit.",
+      "Live ControlRoom report — asset, last message, location, and speed.",
     icon: MapPin,
   },
 };
@@ -54,14 +62,112 @@ export function ReportDetailPanel({
 
   const fuelQuery = useFuelThefts(from, to, "all");
   const incidentsQuery = useDriverIncidents(from, to);
-  const fleetQuery = useFleet();
+  const liveLocationsQuery = useLiveUnitLocations();
+  const {
+    categoryFilter,
+    isActive: categoryFilterActive,
+    unitCategoryById,
+  } = useFleetCategoryFilter();
+
+  const filteredFuelRows = useMemo(() => {
+    if (!fuelQuery.data) return [];
+    return filterFuelFleetRows(fuelQuery.data.fleetTable, {
+      categoryFilter,
+      unitCategoryById,
+    });
+  }, [fuelQuery.data, categoryFilter, unitCategoryById]);
+
+  const fuelFooterTotals = useMemo(() => {
+    if (!fuelQuery.data) return null;
+    return buildFuelSummaryFooter(
+      fuelQuery.data,
+      filteredFuelRows,
+      categoryFilterActive
+    );
+  }, [fuelQuery.data, filteredFuelRows, categoryFilterActive]);
 
   const isLoading =
     type === "fuel"
-      ? fuelQuery.isLoading
+      ? (fuelQuery.isLoading && !fuelQuery.data) ||
+        (fuelQuery.isFetching && !fuelQuery.data)
       : type === "violations"
-        ? fuelQuery.isLoading || incidentsQuery.isLoading
-        : fleetQuery.isLoading;
+        ? (fuelQuery.isLoading && !fuelQuery.data) ||
+          (incidentsQuery.isLoading && !incidentsQuery.data)
+        : liveLocationsQuery.isLoading && !liveLocationsQuery.data;
+
+  if (type === "fuel") {
+    return (
+      <div className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <ExportButtons type={type} from={from} to={to} disabled={!fuelQuery.data} />
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          Period: {periodLabel}
+          {categoryFilterActive ? ` · ${categoryFilter}` : ""}
+        </p>
+
+        {fuelQuery.isFetching && fuelQuery.data && (
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Updating period…
+          </p>
+        )}
+
+        {categoryFilterActive && fuelQuery.data && (
+          <p className="rounded-lg border border-[#99f6e4]/40 bg-[#f0fdfa]/60 px-3 py-2 text-sm text-[#0f766e]">
+            Showing {filteredFuelRows.length} of {fuelQuery.data.fleetTable.length}{" "}
+            units · {categoryFilter}
+          </p>
+        )}
+
+        {isLoading ? (
+          <div className="h-[28rem] animate-pulse rounded-2xl bg-muted" />
+        ) : fuelQuery.data ? (
+          <FleetFuelTheftSummaryTable
+            rows={filteredFuelRows}
+            footerTotals={fuelFooterTotals}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (type === "locations") {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <ExportButtons
+            type={type}
+            from={from}
+            to={to}
+            locationRows={liveLocationsQuery.data ?? []}
+            disabled={liveLocationsQuery.isLoading && !liveLocationsQuery.data}
+          />
+        </div>
+        <CurrentAssetLocationTable
+          rows={liveLocationsQuery.data ?? []}
+          isLoading={liveLocationsQuery.isLoading && !liveLocationsQuery.data}
+          error={
+            liveLocationsQuery.isError
+              ? liveLocationsQuery.error instanceof Error
+                ? liveLocationsQuery.error.message
+                : "Failed to load live asset locations"
+              : null
+          }
+          title="Current asset location"
+          loadingMessage="Fetching live asset locations from telematics"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm">
@@ -82,7 +188,7 @@ export function ReportDetailPanel({
               {meta.description}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {type === "locations" ? "Live snapshot" : `Period: ${periodLabel}`}
+              Period: {periodLabel}
             </p>
           </div>
         </div>
@@ -92,15 +198,11 @@ export function ReportDetailPanel({
       <div className="px-6 py-5">
         {isLoading ? (
           <div className="h-48 animate-pulse rounded-lg bg-muted" />
-        ) : type === "fuel" && fuelQuery.data ? (
-          <FuelPreview data={fuelQuery.data} />
         ) : type === "violations" && fuelQuery.data && incidentsQuery.data ? (
           <ViolationsPreview
             fuelEvents={fuelQuery.data.events}
             incidents={incidentsQuery.data.incidents}
           />
-        ) : type === "locations" && fleetQuery.data ? (
-          <LocationsPreview units={fleetQuery.data.units} />
         ) : null}
       </div>
     </div>
@@ -111,10 +213,14 @@ function ExportButtons({
   type,
   from,
   to,
+  locationRows,
+  disabled = false,
 }: {
   type: ExportReportType;
   from: string;
   to: string;
+  locationRows?: UnitLatestRow[];
+  disabled?: boolean;
 }) {
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -123,6 +229,10 @@ function ExportButtons({
     setError(null);
     setExporting(format);
     try {
+      if (type === "locations" && locationRows && locationRows.length > 0) {
+        downloadLocationsReport(format, locationRows);
+        return;
+      }
       await fetchAndDownloadReport(type, format, from, to);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed");
@@ -140,7 +250,7 @@ function ExportButtons({
             key={fmt}
             variant="outline"
             size="sm"
-            disabled={exporting !== null}
+            disabled={disabled || exporting !== null}
             onClick={() => handleExport(fmt)}
           >
             <FileSpreadsheet className="h-3.5 w-3.5" />
@@ -150,46 +260,6 @@ function ExportButtons({
       </div>
       {error && (
         <p className="mt-2 text-xs text-destructive">{error}</p>
-      )}
-    </div>
-  );
-}
-
-function FuelPreview({ data }: { data: FuelTheftsResponse }) {
-  const { overview } = data;
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Fleet units" value={String(overview.totalFleet)} />
-        <Stat label="Fuel consumed" value={`${formatNumber(overview.fuelConsumedLiters, 0)} L`} />
-        <Stat label="Consumption" value={`${formatNumber(overview.kmPerLiter, 2)} km/L`} />
-        <Stat label="Theft events" value={String(overview.directTheft.count + overview.returnPipeTheft.count)} />
-      </div>
-
-      <PreviewTable
-        title={`Per-vehicle summary (${data.fleetTable.length} units)`}
-        headers={["Unit", "Distance", "Fuel (L)", "Km/L", "Thefts (L)"]}
-        rows={data.fleetTable.slice(0, 8).map((r) => [
-          r.reg,
-          `${formatNumber(r.distanceKm, 0)} km`,
-          `${formatNumber(r.fuelConsumedLiters, 0)} L`,
-          formatNumber(r.kmPerLiter, 2),
-          formatNumber(r.totalTheftLiters, 1),
-        ])}
-      />
-
-      {data.events.length > 0 && (
-        <PreviewTable
-          title={`Recent theft events (${data.events.length} total)`}
-          headers={["Date", "Unit", "Type", "Volume", "Location"]}
-          rows={data.events.slice(0, 5).map((e) => [
-            format(new Date(e.occurredAt), "dd MMM yyyy HH:mm"),
-            e.unitName,
-            e.theftType === "return_pipe" ? "Return pipe" : "Direct",
-            `${formatNumber(e.volumeLiters, 1)} L`,
-            e.locationName,
-          ])}
-        />
       )}
     </div>
   );
@@ -243,33 +313,6 @@ function ViolationsPreview({
           No violations recorded for this period.
         </p>
       )}
-    </div>
-  );
-}
-
-function LocationsPreview({ units }: { units: FleetUnitRow[] }) {
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Total units" value={String(units.length)} />
-        <Stat label="Updating" value={String(units.filter((u) => u.isOnline).length)} />
-        <Stat label="Non-updating" value={String(units.filter((u) => !u.isOnline).length)} />
-      </div>
-
-      <PreviewTable
-        title="Current positions"
-        headers={["Unit", "Driver", "Connectivity", "Latitude", "Longitude", "Last update"]}
-        rows={units.slice(0, 10).map((u) => [
-          u.name,
-          u.driverName ?? "—",
-          u.isOnline ? "Updating" : "Non-updating",
-          u.lastLat != null ? u.lastLat.toFixed(5) : "—",
-          u.lastLon != null ? u.lastLon.toFixed(5) : "—",
-          u.lastMessageAt
-            ? format(new Date(u.lastMessageAt), "dd MMM yyyy HH:mm")
-            : "—",
-        ])}
-      />
     </div>
   );
 }
@@ -334,9 +377,9 @@ export const REPORT_CARDS: {
 }[] = [
   {
     type: "fuel",
-    title: "Fuel report",
+    title: "Fleet Fuel & Theft Summary",
     description:
-      "Per-vehicle fuel consumption (km/L), fill-ups, and drains for the selected period.",
+      "Per-vehicle fuel consumption, theft volumes, and efficiency for the selected period.",
     icon: Fuel,
     cardClass: "bg-blue-50/80 border-blue-100",
     iconWrapClass: "bg-blue-100",
@@ -353,8 +396,8 @@ export const REPORT_CARDS: {
   },
   {
     type: "locations",
-    title: "Vehicle locations report",
-    description: "Last known position, speed, and message time per unit.",
+    title: "Current asset location",
+    description: "Live ControlRoom report — asset, last message, location, and speed.",
     icon: MapPin,
     cardClass: "bg-rose-50/80 border-rose-100",
     iconWrapClass: "bg-rose-100",

@@ -2,11 +2,14 @@ import { format } from "date-fns";
 import { rowsToCsv } from "@/lib/export/csv";
 import { getFuelThefts } from "@/lib/services/analytics";
 import { getFleetViolations } from "@/lib/services/violations";
-import { getFleetSummary } from "@/lib/services/fleet";
+import { getLiveUnitLocations } from "@/lib/telematics/locations";
 import { formatDuration } from "@/lib/fleet/theft-filters";
 import { incidentTypeLabel } from "@/lib/fleet/violations-model";
 import { appConfig } from "@/lib/config/env";
-import { formatNumber } from "@/lib/utils";
+import {
+  buildCurrentAssetLocationPdfBuffer,
+  locationsTableRows,
+} from "@/lib/export/location-report-pdf";
 
 function periodHeader(
   reportName: string,
@@ -195,57 +198,23 @@ async function buildViolationsReportRows(
 }
 
 async function buildVehicleLocationsRows(): Promise<ReportRows> {
-  const fleet = await getFleetSummary();
+  const rows = await getLiveUnitLocations();
 
-  const rows: ReportRows = [
-    ["Current Vehicle Locations"],
+  return [
+    ["Current asset location"],
     [`${appConfig.name} — ${appConfig.orgLabel}`],
     ["Generated", format(new Date(), "dd MMM yyyy HH:mm")],
-    ["Note", "Coordinates from last live telemetry message"],
+    ["Note", "Live ControlRoom report · sorted by speed"],
+    ["Assets", rows.length],
     [],
-    [
-      "Registration",
-      "Unit name",
-      "Category",
-      "Vehicle type",
-      "Driver",
-      "Status",
-      "Connectivity",
-      "Latitude",
-      "Longitude",
-      "Last update",
-      "Maps link",
-    ],
+    ["Asset", "Last message", "Location", "Speed"],
+    ...locationsTableRows(rows),
   ];
+}
 
-  for (const unit of fleet.units) {
-    const isUpdating = unit.isOnline;
-
-    const lat = unit.lastLat;
-    const lon = unit.lastLon;
-    const mapsLink =
-      lat != null && lon != null
-        ? `https://www.google.com/maps?q=${lat},${lon}`
-        : "";
-
-    rows.push([
-      unit.plateNumber ?? "",
-      unit.name,
-      unit.category,
-      unit.vehicleType,
-      unit.driverName,
-      unit.status,
-      isUpdating ? "Updating" : "Non-updating",
-      lat != null ? lat.toFixed(6) : "",
-      lon != null ? lon.toFixed(6) : "",
-      unit.lastMessageAt
-        ? format(new Date(unit.lastMessageAt), "dd MMM yyyy HH:mm")
-        : "",
-      mapsLink,
-    ]);
-  }
-
-  return rows;
+export async function buildLocationsPdf(): Promise<Buffer> {
+  const rows = await getLiveUnitLocations();
+  return buildCurrentAssetLocationPdfBuffer(rows);
 }
 
 export async function buildExportCsv(
@@ -260,7 +229,7 @@ export async function buildExportCsv(
 const REPORT_TITLES: Record<ExportReportType, string> = {
   fuel: "Fuel Report",
   violations: "Violations Report",
-  locations: "Vehicle Locations",
+  locations: "Current Asset Location",
 };
 
 export function reportTitle(type: ExportReportType): string {
@@ -281,6 +250,6 @@ export function exportFilename(
     case "violations":
       return `kasulu-violations-report_${range}_${stamp}.${ext}`;
     case "locations":
-      return `kasulu-vehicle-locations_${stamp}.${ext}`;
+      return `kasulu-current-asset-location_${stamp}.${ext}`;
   }
 }

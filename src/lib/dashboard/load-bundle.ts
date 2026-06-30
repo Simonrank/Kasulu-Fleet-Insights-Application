@@ -5,7 +5,7 @@ import { getFleetDataset } from "@/lib/google-sheets/fleet-dataset";
 import { getUtilizationBundle } from "@/lib/google-sheets/utilization-cache";
 import { emptySpeedViolationsSummary } from "@/lib/fleet/speed-violations-analytics";
 
-/** Dashboard KPIs, thefts, fleet, and utilization — one sheet fetch. */
+/** Dashboard KPIs, thefts, fleet, and utilization — sheet data only (fast path). */
 export async function loadDashboardBundle(
   from: Date,
   to: Date

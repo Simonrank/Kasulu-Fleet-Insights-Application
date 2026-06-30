@@ -3,6 +3,10 @@
 import { format } from "date-fns";
 import { Radio, Fuel, Gauge, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  connectivityBandBadgeVariant,
+  connectivityBandLabel,
+} from "@/lib/fleet/connectivity";
 import { formatNumber } from "@/lib/utils";
 import type { FleetUnitRow, FuelFleetRow, FuelTheftDetail } from "@/lib/types";
 
@@ -35,8 +39,8 @@ export function VehicleDetailPanel({ unit, metrics, events, from, to }: Props) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline">{unit.category}</Badge>
-          <Badge variant={unit.isUpdating ? "success" : "destructive"}>
-            {unit.isUpdating ? "Updating" : "Non-updating"}
+          <Badge variant={connectivityBandBadgeVariant(unit.connectivityBand)}>
+            {connectivityBandLabel(unit.connectivityBand)}
           </Badge>
           <Badge
             variant={

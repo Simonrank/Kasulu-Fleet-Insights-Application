@@ -1,16 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Filter, Search } from "lucide-react";
 import { useDriverIncidents } from "@/hooks/use-fleet-data";
-import { TabWorkspace } from "@/components/dashboard/tab-workspace";
 import { ViolationEventsTable } from "@/components/dashboard/violation-events-table";
 import { ViolationOverviewCards } from "@/components/dashboard/violation-overview-cards";
 import {
   incidentTypeLabel,
-  summarizeViolationTypes,
+  matchesViolationGroup,
+  summarizeViolationGroups,
   totalIncidentDurationSeconds,
+  violationGroupLabel,
   violationTypeColor,
 } from "@/lib/fleet/violations-model";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Bar,
   BarChart,
@@ -27,6 +36,7 @@ import {
 type Props = {
   from: string;
   to: string;
+  isDefault24h?: boolean;
 };
 
 const CHART = {
@@ -44,7 +54,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <div className="dash-panel h-full">
+    <div className="dash-panel min-w-0">
       <div className="mb-5">
         <h3 className="text-base font-semibold text-dash-foreground">{title}</h3>
         {subtitle && (
@@ -56,7 +66,7 @@ function Panel({
   );
 }
 
-export function DriverIncidentsTab({ from, to }: Props) {
+export function DriverIncidentsTab({ from, to, isDefault24h = false }: Props) {
   const [search, setSearch] = useState("");
   const [incidentType, setIncidentType] = useState("all");
   const [selectedType, setSelectedType] = useState<string | null>(null);
@@ -65,7 +75,6 @@ export function DriverIncidentsTab({ from, to }: Props) {
   const { data, isLoading, isFetching, error } = useDriverIncidents(from, to);
 
   const incidents = useMemo(() => data?.incidents ?? [], [data?.incidents]);
-  const summary = data?.summary;
 
   const selectViolationType = useCallback((type: string) => {
     setSelectedType(type);
@@ -102,7 +111,7 @@ export function DriverIncidentsTab({ from, to }: Props) {
   }, [incidents, search, severity]);
 
   const typeSummaries = useMemo(
-    () => summarizeViolationTypes(filteredRows),
+    () => summarizeViolationGroups(filteredRows),
     [filteredRows]
   );
 
@@ -113,7 +122,7 @@ export function DriverIncidentsTab({ from, to }: Props) {
 
   const detailRows = useMemo(() => {
     if (!selectedType) return [];
-    return filteredRows.filter((row) => row.incidentType === selectedType);
+    return filteredRows.filter((row) => matchesViolationGroup(row, selectedType));
   }, [filteredRows, selectedType]);
 
   const typeChartData = useMemo(() => {
@@ -125,17 +134,31 @@ export function DriverIncidentsTab({ from, to }: Props) {
     }));
   }, [typeSummaries]);
 
-  const topUnitsData = useMemo(
-    () => (summary?.topUnits ?? []).slice(0, 8),
-    [summary?.topUnits]
-  );
+  const topUnitsData = useMemo(() => {
+    const counts = new Map<string, { unitName: string; count: number }>();
+    for (const row of incidents) {
+      const key = row.unitName;
+      const entry = counts.get(key) ?? { unitName: row.unitName, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+    return [...counts.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [incidents]);
 
   const hasActiveFilters =
-    search.length > 0 || severity !== "all" || selectedType != null;
+    search.length > 0 ||
+    severity !== "all" ||
+    selectedType != null;
 
-  if (isLoading && !data) {
+  if ((isLoading && !data) || (isFetching && !data)) {
     return (
       <div className="space-y-6">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          Loading live telematics violations… first load can take 20–30 seconds
+          while Wialon reports are fetched.
+        </div>
         <div className="h-24 animate-pulse rounded-xl bg-muted" />
         <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -149,37 +172,57 @@ export function DriverIncidentsTab({ from, to }: Props) {
 
   return (
     <div className="space-y-6">
-      <TabWorkspace
-        title="Violations & driver incidents"
-        from={from}
-        to={to}
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Unit, violation type, location, or description"
-        filters={[
-          {
-            id: "severity",
-            label: "Severity",
-            value: severity,
-            onChange: setSeverity,
-            placeholder: "All severities",
-            options: [
-              { value: "all", label: "All severities" },
-              { value: "critical", label: "Critical" },
-              { value: "high", label: "High" },
-              { value: "medium", label: "Medium" },
-              { value: "low", label: "Low" },
-            ],
-          },
-        ]}
-        resultSummary={
-          hasActiveFilters
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="min-w-[14rem] flex-1 space-y-1">
+          <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <Search className="h-3 w-3" />
+            Search
+          </label>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Unit, violation type, location…"
+            className="dash-date-input h-9 w-full rounded-lg px-3 text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <Filter className="h-3 w-3" />
+            Severity
+          </label>
+          <Select value={severity} onValueChange={setSeverity}>
+            <SelectTrigger className="dash-date-input h-9 min-w-[11rem] rounded-lg px-3 text-sm">
+              <SelectValue placeholder="All severities" />
+            </SelectTrigger>
+            <SelectContent>
+              {[
+                { value: "all", label: "All severities" },
+                { value: "critical", label: "Critical" },
+                { value: "high", label: "High" },
+                { value: "medium", label: "Medium" },
+                { value: "low", label: "Low" },
+              ].map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {(hasActiveFilters ||
+        isDefault24h ||
+        data?.source === "live") && (
+        <p className="rounded-lg border border-[#99f6e4]/40 bg-[#f0fdfa]/60 px-3 py-2 text-sm text-[#0f766e]">
+          {hasActiveFilters
             ? `Showing ${filteredRows.length} of ${incidents.length} violations`
-            : data?.source === "live"
-              ? "Live telematics"
-              : undefined
-        }
-      />
+            : isDefault24h
+              ? "Last 24 hours · live telematics · change dates above for earlier days"
+              : "Live telematics"}
+        </p>
+      )}
 
       {(isFetching || isLoading) && (
         <p className="text-xs text-dash-muted">
@@ -212,7 +255,7 @@ export function DriverIncidentsTab({ from, to }: Props) {
       ) : (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-10 text-center">
           <p className="text-sm font-medium text-slate-700">
-            Select a violation type above or click a segment in the chart
+            Select a speed band or other violations above, or click a chart segment
           </p>
           <p className="mt-1 text-xs text-slate-500">
             Event details will appear here — unit, times, duration, and location
@@ -222,54 +265,56 @@ export function DriverIncidentsTab({ from, to }: Props) {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel
-          title="Violations by type"
-          subtitle="Click a segment to filter the detail table"
+          title="Violations by speed band"
+          subtitle="Speed events grouped by km/h · click to filter the table"
         >
           {typeChartData.length === 0 ? (
             <p className="py-16 text-center text-sm text-dash-muted">
               No violations in this period
             </p>
           ) : (
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={typeChartData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    stroke="none"
-                  >
-                    {typeChartData.map((entry) => (
-                      <Cell
-                        key={entry.typeKey}
-                        fill={entry.fill}
-                        stroke={
-                          selectedType === entry.typeKey ? "#0f172a" : "none"
-                        }
-                        strokeWidth={selectedType === entry.typeKey ? 2 : 0}
-                        className="cursor-pointer transition-opacity hover:opacity-80"
-                        onClick={() => selectViolationType(entry.typeKey)}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value, _name, props) => {
-                      const payload = props.payload as { name?: string };
-                      return [value, payload.name ?? "Violations"];
-                    }}
-                    contentStyle={{
-                      borderRadius: 12,
-                      border: "1px solid #e2e8f0",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-dash-muted">
+            <>
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={typeChartData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={56}
+                      outerRadius={92}
+                      paddingAngle={2}
+                      stroke="none"
+                    >
+                      {typeChartData.map((entry) => (
+                        <Cell
+                          key={entry.typeKey}
+                          fill={entry.fill}
+                          stroke={
+                            selectedType === entry.typeKey ? "#0f172a" : "none"
+                          }
+                          strokeWidth={selectedType === entry.typeKey ? 2 : 0}
+                          className="cursor-pointer transition-opacity hover:opacity-80"
+                          onClick={() => selectViolationType(entry.typeKey)}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, _name, props) => {
+                        const payload = props.payload as { name?: string };
+                        return [value, payload.name ?? "Violations"];
+                      }}
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid #e2e8f0",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-2 px-1 pb-1 text-xs text-dash-muted">
                 {typeChartData.map((item) => (
                   <button
                     key={item.typeKey}
@@ -277,19 +322,21 @@ export function DriverIncidentsTab({ from, to }: Props) {
                     onClick={() => selectViolationType(item.typeKey)}
                     className={
                       selectedType === item.typeKey
-                        ? "flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-800"
-                        : "flex items-center gap-1.5 rounded-full px-2 py-1 transition-colors hover:bg-slate-100"
+                        ? "flex max-w-full items-center gap-1.5 rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-800"
+                        : "flex max-w-full items-center gap-1.5 rounded-full px-2 py-1 transition-colors hover:bg-slate-100"
                     }
                   >
                     <span
-                      className="inline-block h-2.5 w-2.5 rounded-full"
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
                       style={{ background: item.fill }}
                     />
-                    {item.name} ({item.value})
+                    <span className="truncate">
+                      {item.name} ({item.value})
+                    </span>
                   </button>
                 ))}
               </div>
-            </div>
+            </>
           )}
         </Panel>
 

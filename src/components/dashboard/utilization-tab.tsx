@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useUtilization } from "@/hooks/use-fleet-data";
-import { TabWorkspace } from "@/components/dashboard/tab-workspace";
+import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
+import { useUtilizationViewFilter } from "@/context/utilization-view-filter";
+import { aggregateUtilizationFleet } from "@/lib/fleet/fleet-metrics-aggregation";
+import { matchesCategoryFilter } from "@/lib/fleet/theft-filters";
+import { buildNaturalBuckets } from "@/lib/data-driven/buckets";
+import {
+  DataLoadError,
+  VERCEL_SHEETS_HINTS,
+} from "@/components/dashboard/data-load-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn, formatNumber } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Gauge, MapPin, Clock, Timer } from "lucide-react";
@@ -22,8 +30,6 @@ type Props = {
   to: string;
 };
 
-type ViewFilter = "all" | "top" | "underutilized";
-
 const PAGE_SIZE = 10;
 
 const CHART = {
@@ -35,35 +41,47 @@ const CHART = {
 };
 
 export function UtilizationTab({ from, to }: Props) {
-  const [search, setSearch] = useState("");
-  const [view, setView] = useState<ViewFilter>("all");
   const [page, setPage] = useState(0);
-  const { data, isLoading, isFetching, isPlaceholderData } = useUtilization(from, to);
+  const { view } = useUtilizationViewFilter();
+  const { categoryFilter, unitCategoryById, isActive: categoryFilterActive } =
+    useFleetCategoryFilter();
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+    isPlaceholderData,
+  } = useUtilization(from, to);
 
   useEffect(() => {
     setPage(0);
-  }, [search, view, from, to]);
+  }, [view, from, to, categoryFilter]);
 
-  const showSkeleton = isLoading && !data;
+  const categoryScopedUnits = useMemo(() => {
+    if (!data) return [];
+    if (categoryFilter === "all") return data.byUnit;
+    return data.byUnit.filter((unit) =>
+      matchesCategoryFilter(
+        unitCategoryById.get(unit.unitId) ?? unit.category,
+        categoryFilter
+      )
+    );
+  }, [data, categoryFilter, unitCategoryById]);
 
   const filteredUnits = useMemo(() => {
     if (!data) return [];
-    const query = search.trim().toLowerCase();
 
-    let units = [...data.byUnit];
+    let units = [...categoryScopedUnits];
     if (view === "underutilized") {
       units.sort((a, b) => a.distanceKm - b.distanceKm);
+    } else if (view === "top") {
+      units.sort((a, b) => b.distanceKm - a.distanceKm);
     }
 
-    if (!query) return units;
-    return units.filter((u) =>
-      [u.unitName, u.driverName, u.category]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(query)
-    );
-  }, [data, search, view]);
+    return units;
+  }, [data, view, categoryScopedUnits]);
 
   const pageCount = Math.max(1, Math.ceil(filteredUnits.length / PAGE_SIZE));
   const pageRows = useMemo(
@@ -78,7 +96,7 @@ export function UtilizationTab({ from, to }: Props) {
 
   const topChartData = useMemo(() => {
     if (!data) return [];
-    return [...data.byUnit]
+    return [...categoryScopedUnits]
       .sort((a, b) => b.distanceKm - a.distanceKm)
       .slice(0, 12)
       .map((u) => ({
@@ -90,7 +108,7 @@ export function UtilizationTab({ from, to }: Props) {
         distanceKm: Math.round(u.distanceKm * 10) / 10,
         engineHours: Math.round(u.engineHours * 10) / 10,
       }));
-  }, [data]);
+  }, [data, categoryScopedUnits]);
 
   const dualAxisChartData = useMemo(() => {
     if (!data) return [];
@@ -100,78 +118,93 @@ export function UtilizationTab({ from, to }: Props) {
       "Distance (km)": row.distanceKm,
       "Engine hrs": row.engineHours,
     }));
-  }, [topChartData, data]);
+  }, [topChartData]);
+
+  const kpiFleet = useMemo(
+    () => aggregateUtilizationFleet(categoryScopedUnits),
+    [categoryScopedUnits]
+  );
+
+  const distanceBuckets = useMemo(() => {
+    if (!data) return [];
+    if (categoryFilter === "all") return data.distanceBuckets;
+    return buildNaturalBuckets(
+      categoryScopedUnits.map((unit) => unit.distanceKm)
+    ).map((bucket) => ({ label: bucket.label, count: bucket.count }));
+  }, [data, categoryFilter, categoryScopedUnits]);
+
+  const showSkeleton = isLoading && !data;
 
   if (showSkeleton) {
     return <UtilizationSkeleton />;
   }
 
-  if (!data) {
-    return <UtilizationSkeleton />;
+  if (isError || !data) {
+    return (
+      <div className="flex min-h-[40vh] items-start justify-center">
+        <DataLoadError
+          title="Utilization could not load"
+          message={
+            error instanceof Error
+              ? error.message
+              : "Sheet data did not load for this period."
+          }
+          hints={VERCEL_SHEETS_HINTS}
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      </div>
+    );
   }
 
-  const { fleet } = data;
-  const hasActiveFilters = search.length > 0 || view !== "all";
+  const hasActiveFilters = view !== "all" || categoryFilterActive;
+  const kpiDetailSuffix =
+    categoryFilter !== "all"
+      ? ` · ${categoryFilter} (${kpiFleet.unitCount} units)`
+      : "";
 
   return (
     <div className={cn("space-y-6", isFetching && !isPlaceholderData && "opacity-90")}>
-      <TabWorkspace
-        title="Kasulu utilization workspace"
-        from={from}
-        to={to}
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Unit, category, or driver"
-        filters={[
-          {
-            id: "view",
-            label: "View",
-            value: view,
-            onChange: (v) => setView(v as ViewFilter),
-            placeholder: "All units",
-            options: [
-              { value: "all", label: "All units" },
-              { value: "top", label: "Top utilized" },
-              { value: "underutilized", label: "Underutilized" },
-            ],
-          },
-        ]}
-        resultSummary={
-          hasActiveFilters
-            ? `Showing ${filteredUnits.length} of ${data.byUnit.length} units`
-            : undefined
-        }
-      />
+      {hasActiveFilters && (
+        <p className="rounded-lg border border-[#99f6e4]/40 bg-[#f0fdfa]/60 px-3 py-2 text-sm text-[#0f766e]">
+          Showing {filteredUnits.length} of {categoryScopedUnits.length} units
+          {view !== "all"
+            ? view === "top"
+              ? " · top utilized"
+              : " · underutilized"
+            : ""}
+        </p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricTile
           title="Total distance"
-          value={`${formatNumber(fleet.totalDistanceKm, 1)} km`}
-          detail="Fleet mileage in period"
+          value={`${formatNumber(kpiFleet.totalDistanceKm, 1)} km`}
+          detail={`Fleet mileage in period${kpiDetailSuffix}`}
           icon={<MapPin className="h-4 w-4 text-sky-600" />}
           iconBg="bg-sky-50"
           accent="bg-sky-500"
         />
         <MetricTile
           title="Total engine hours"
-          value={`${formatNumber(fleet.totalEngineHours, 1)} hrs`}
-          detail="Runtime across fleet"
+          value={`${formatNumber(kpiFleet.totalEngineHours, 1)} hrs`}
+          detail={`Runtime across fleet${kpiDetailSuffix}`}
           icon={<Clock className="h-4 w-4 text-violet-600" />}
           iconBg="bg-violet-50"
           accent="bg-violet-500"
         />
         <MetricTile
           title="Avg km / engine hr"
-          value={formatNumber(fleet.avgKmPerEngineHour, 1)}
-          detail="Distance correlated with runtime"
+          value={formatNumber(kpiFleet.avgKmPerEngineHour, 1)}
+          detail={`Distance correlated with runtime${kpiDetailSuffix}`}
           icon={<Gauge className="h-4 w-4 text-emerald-600" />}
           iconBg="bg-emerald-50"
           accent="bg-emerald-500"
         />
         <MetricTile
           title="Idle hours"
-          value={`${formatNumber(fleet.totalIdleHours, 1)} hrs`}
-          detail={`Productive: ${formatNumber(fleet.totalProductiveHours, 1)} hrs`}
+          value={`${formatNumber(kpiFleet.totalIdleHours, 1)} hrs`}
+          detail={`Productive: ${formatNumber(kpiFleet.totalProductiveHours, 1)} hrs${kpiDetailSuffix}`}
           icon={<Timer className="h-4 w-4 text-amber-600" />}
           iconBg="bg-amber-50"
           accent="bg-amber-500"
@@ -255,14 +288,14 @@ export function UtilizationTab({ from, to }: Props) {
           </CardHeader>
           <CardContent>
             <div className="h-72">
-              {data.distanceBuckets.every((b) => b.count === 0) ? (
+              {distanceBuckets.every((b) => b.count === 0) ? (
                 <p className="py-16 text-center text-sm text-muted-foreground">
                   No vehicles in this period
                 </p>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={data.distanceBuckets}
+                    data={distanceBuckets}
                     margin={{ top: 8, right: 8, left: 0, bottom: 48 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />

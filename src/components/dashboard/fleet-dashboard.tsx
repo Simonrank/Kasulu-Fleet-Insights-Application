@@ -2,26 +2,38 @@
 
 import { format } from "date-fns";
 import { useMemo, useState } from "react";
-import {
-  Radio,
-} from "lucide-react";
-import { useDashboard, useSpeedViolations, useUnitLocations } from "@/hooks/use-fleet-data";
+import { useDashboard, useLiveUnitLocations, useSpeedViolations } from "@/hooks/use-fleet-data";
 import { emptySpeedViolationsSummary } from "@/lib/fleet/speed-violations-analytics";
+import {
+  connectivityBandLabel,
+  connectivityStaleLabel,
+  matchesConnectivityFilter,
+} from "@/lib/fleet/connectivity";
+import {
+  applyLiveMobileStatusToBundle,
+  buildLiveConnectivityState,
+} from "@/lib/fleet/connectivity-overlay";
+import {
+  aggregateKpisForCategory,
+  filterFleetTableByCategory,
+  filterFleetUnitsByCategory,
+} from "@/lib/fleet/category-kpis";
+import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
 import { cn, formatNumber } from "@/lib/utils";
-import type {
-  ConnectivityFilter,
-  FleetSummary,
-  KpiSummary,
-} from "@/lib/types";
+import type { ConnectivityFilter, FleetSummary, KpiSummary } from "@/lib/types";
 import { filterTheftEvents } from "@/lib/fleet/theft-filters";
+import {
+  DataLoadError,
+  VERCEL_SHEETS_HINTS,
+} from "@/components/dashboard/data-load-error";
 import { ConnectivityVehicleList } from "@/components/dashboard/connectivity-vehicle-list";
 import { CurrentAssetLocationTable } from "@/components/dashboard/current-asset-location-table";
 import { SpeedViolationsChart } from "@/components/dashboard/speed-violations-chart";
 import { TopViolatorsTable } from "@/components/dashboard/top-violators-table";
 import { VehicleDetailPanel } from "@/components/dashboard/vehicle-detail-panel";
+import { MetricCard } from "@/components/dashboard/metric-card";
 import {
   FleetIntelligenceRoot,
-  FleetIntelligenceWorkspace,
   useFleetIntelligenceFilters,
 } from "@/components/dashboard/fleet-register-panel";
 import {
@@ -54,38 +66,6 @@ type Props = {
   to: string;
 };
 
-function MetricCard({
-  title,
-  value,
-  detail,
-  tone = "neutral",
-}: {
-  title: string;
-  value: string;
-  detail?: string;
-  tone?: "neutral" | "accent" | "danger" | "warning";
-}) {
-  return (
-    <div
-      className={cn(
-        "dash-metric-card",
-        tone === "danger" && "dash-metric-card--danger",
-        tone === "accent" && "dash-metric-card--accent",
-        tone === "warning" && "dash-metric-card--warning",
-        tone === "neutral" && "dash-metric-card--neutral"
-      )}
-    >
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-dash-muted">
-        {title}
-      </p>
-      <p className="dash-metric-card__value">{value}</p>
-      {detail && (
-        <p className="mt-2 text-[11px] leading-snug text-dash-muted">{detail}</p>
-      )}
-    </div>
-  );
-}
-
 function DashboardSkeleton() {
   return (
     <div className="space-y-6 p-6 md:p-8">
@@ -108,53 +88,130 @@ function DashboardSkeleton() {
   );
 }
 
+const CONNECTIVITY_CHART = {
+  updating: "#059669",
+  staleOver4Hours: "#eab308",
+  staleOver24Hours: "#f97316",
+  staleOver48Hours: "#dc2626",
+  unknown: "#94a3b8",
+};
+
 function ConnectivityPanel({
   data,
   fleet,
   filter,
   onFilterChange,
+  isLive = false,
 }: {
-  data: KpiSummary;
+  data: Pick<
+    KpiSummary,
+    "connectivityBands" | "updatingUnits" | "nonUpdatingUnits" | "totalUnits"
+  >;
   fleet: FleetSummary | undefined;
   filter: ConnectivityFilter | null;
   onFilterChange: (filter: ConnectivityFilter | null) => void;
+  isLive?: boolean;
 }) {
+  const bands = data.connectivityBands;
   const toggleFilter = (next: ConnectivityFilter) => {
     onFilterChange(filter === next ? null : next);
   };
 
-  const slices = [
-    { name: "Updating", value: data.updatingUnits, fill: CHART.updating },
-    { name: "Non-updating", value: data.nonUpdatingUnits, fill: CHART.nonUpdating },
-  ].filter((s) => s.value > 0);
+  const rows: {
+    key: ConnectivityFilter;
+    label: string;
+    value: number;
+    fill: string;
+    hint: string;
+  }[] = [
+    {
+      key: "updating",
+      label: connectivityBandLabel("updating"),
+      value: bands.updating,
+      fill: CONNECTIVITY_CHART.updating,
+      hint: "≤ 4 hours",
+    },
+    {
+      key: "stale_over_4h",
+      label: connectivityStaleLabel("stale_over_4h"),
+      value: bands.staleOver4Hours,
+      fill: CONNECTIVITY_CHART.staleOver4Hours,
+      hint: "4–24 hours ago",
+    },
+    {
+      key: "stale_over_24h",
+      label: connectivityStaleLabel("stale_over_24h"),
+      value: bands.staleOver24Hours,
+      fill: CONNECTIVITY_CHART.staleOver24Hours,
+      hint: "24–48 hours ago",
+    },
+    {
+      key: "stale_over_48h",
+      label: connectivityStaleLabel("stale_over_48h"),
+      value: bands.staleOver48Hours,
+      fill: CONNECTIVITY_CHART.staleOver48Hours,
+      hint: "More than 48 hours ago",
+    },
+  ];
+
+  if (bands.unknown > 0) {
+    rows.push({
+      key: "unknown",
+      label: connectivityBandLabel("unknown"),
+      value: bands.unknown,
+      fill: CONNECTIVITY_CHART.unknown,
+      hint: "No timestamp",
+    });
+  }
+
+  const slices = rows
+    .filter((row) => row.value > 0)
+    .map((row) => ({ name: row.label, value: row.value, fill: row.fill }));
 
   const onlinePct =
-    data.totalUnits > 0
-      ? (data.updatingUnits / data.totalUnits) * 100
-      : 0;
+    data.totalUnits > 0 ? (data.updatingUnits / data.totalUnits) * 100 : 0;
 
   return (
-    <div className="dash-panel h-full">
-      <div className="mb-6">
-        <h3 className="text-base font-semibold text-dash-foreground">
-          Fleet connectivity
-        </h3>
-        <p className="mt-1 text-xs text-dash-muted">
-          Live telemetry · last 30 minutes
-        </p>
+    <div className="dash-panel flex h-full min-w-0 flex-col">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-dash-foreground">
+            Fleet connectivity
+          </h3>
+          <p className="mt-0.5 text-xs text-dash-muted">
+            {isLive
+              ? "Live telematics · each unit in one band"
+              : "Last message · each unit in one band"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {isLive && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+              Live
+            </span>
+          )}
+          <span className="rounded-full border border-[#99f6e4] bg-[#f0fdfa] px-2.5 py-1 text-xs font-semibold tabular-nums text-[#0d9488]">
+            {data.totalUnits} units
+          </span>
+        </div>
       </div>
 
-      <div className="flex flex-col items-center gap-6 sm:flex-row">
-        <div className="relative h-44 w-44">
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="relative mx-auto h-32 w-32 shrink-0">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={slices.length ? slices : [{ name: "Empty", value: 1, fill: "#e2e8f0" }]}
+                data={
+                  slices.length
+                    ? slices
+                    : [{ name: "Empty", value: 1, fill: "#e2e8f0" }]
+                }
                 cx="50%"
                 cy="50%"
-                innerRadius={52}
-                outerRadius={72}
-                paddingAngle={4}
+                innerRadius={38}
+                outerRadius={54}
+                paddingAngle={3}
                 dataKey="value"
                 stroke="none"
               >
@@ -165,60 +222,55 @@ function ConnectivityPanel({
             </PieChart>
           </ResponsiveContainer>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-2xl font-bold text-dash-foreground tabular-nums">
+            <span className="text-xl font-bold text-dash-foreground tabular-nums">
               {formatNumber(onlinePct, 0)}%
             </span>
-            <span className="text-[10px] uppercase tracking-wider text-dash-muted">
-              online
+            <span className="text-[9px] uppercase tracking-wider text-dash-muted">
+              updating
             </span>
           </div>
         </div>
 
-        <div className="grid w-full flex-1 gap-3">
-          <button
-            type="button"
-            onClick={() => toggleFilter("updating")}
-            className={cn(
-              "dash-stat-row w-full cursor-pointer text-left transition-colors hover:border-[#99f6e4] hover:bg-[#f0fdfa]",
-              filter === "updating" && "border-[#99f6e4] bg-[#f0fdfa] ring-1 ring-[#0d9488]/20"
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <Radio className="h-4 w-4 text-[#059669]" />
-              <span className="text-sm text-dash-foreground">Updating</span>
-            </div>
-            <span className="text-lg font-bold tabular-nums text-[#059669]">
-              {data.updatingUnits}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleFilter("non_updating")}
-            className={cn(
-              "dash-stat-row w-full cursor-pointer text-left transition-colors hover:border-red-200 hover:bg-red-50/50",
-              filter === "non_updating" &&
-                "border-red-200 bg-red-50/80 ring-1 ring-red-200"
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <Radio className="h-4 w-4 text-[#dc2626]" />
-              <span className="text-sm text-dash-foreground">Non-updating</span>
-            </div>
-            <span className="text-lg font-bold tabular-nums text-[#dc2626]">
-              {data.nonUpdatingUnits}
-            </span>
-          </button>
-          <div className="dash-stat-row border-[#99f6e4] bg-[#f0fdfa]">
-            <span className="text-sm text-dash-muted">Total fleet</span>
-            <span className="font-semibold tabular-nums text-[#0d9488]">
-              {data.totalUnits} units
-            </span>
-          </div>
+        <div className="grid min-w-0 grid-cols-2 gap-2">
+          {rows.map((row) => (
+            <button
+              key={row.key}
+              type="button"
+              onClick={() => toggleFilter(row.key)}
+              title={`${row.label} — ${row.hint}`}
+              className={cn(
+                "flex min-w-0 items-center justify-between gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                row.key === "updating"
+                  ? "border-slate-200 bg-slate-50 hover:border-[#99f6e4] hover:bg-[#f0fdfa]"
+                  : "border-slate-200 bg-slate-50 hover:border-red-200 hover:bg-red-50/50",
+                filter === row.key &&
+                  (row.key === "updating"
+                    ? "border-[#99f6e4] bg-[#f0fdfa] ring-1 ring-[#0d9488]/20"
+                    : "border-red-200 bg-red-50/80 ring-1 ring-red-200")
+              )}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: row.fill }}
+                />
+                <span className="truncate text-[11px] leading-tight text-dash-foreground">
+                  {row.label}
+                </span>
+              </div>
+              <span
+                className="shrink-0 text-sm font-bold tabular-nums"
+                style={{ color: row.fill }}
+              >
+                {row.value}
+              </span>
+            </button>
+          ))}
         </div>
       </div>
 
       {filter && fleet && (
-        <div className="mt-6 border-t border-border/60 pt-5">
+        <div className="mt-4 border-t border-border/60 pt-4">
           <ConnectivityVehicleList
             units={fleet.units}
             filter={filter}
@@ -236,12 +288,21 @@ function DashboardContent({ from, to }: Props) {
 
   const {
     theftType,
-    durationBand,
     vehicleType,
     unitCategoryById,
     selectedUnitId,
     selectedUnit,
   } = useFleetIntelligenceFilters();
+  const { categoryFilter: kpiCategoryFilter, unitCategoryById: kpiUnitCategoryById } =
+    useFleetCategoryFilter();
+
+  const {
+    data: liveUnitLocations,
+    isLoading: liveLocationsLoading,
+    isFetching: liveLocationsFetching,
+    error: liveLocationsError,
+  } = useLiveUnitLocations();
+  const liveRows = liveUnitLocations ?? [];
 
   const { data: dashboard, isLoading, isFetching } = useDashboard(from, to);
   const {
@@ -250,26 +311,38 @@ function DashboardContent({ from, to }: Props) {
     isFetching: speedViolationsFetching,
     error: speedViolationsError,
   } = useSpeedViolations(from, to);
-  const {
-    data: unitLocations,
-    isLoading: unitLocationsLoading,
-    isFetching: unitLocationsFetching,
-    error: unitLocationsError,
-  } = useUnitLocations(from, to);
   const speedViolations = speedViolationsAsync ?? emptySpeedViolationsSummary();
   const speedChartLoading =
     speedViolationsLoading ||
     (speedViolationsFetching && speedViolations.totalEvents === 0);
-  const kpis = dashboard?.kpis;
-  const thefts = dashboard?.thefts;
-  const fleet = dashboard?.fleet;
+
+  const liveConnectivity = useMemo(
+    () =>
+      buildLiveConnectivityState(
+        liveRows,
+        dashboard?.kpis.totalUnits
+      ),
+    [liveRows, dashboard?.kpis.totalUnits]
+  );
+
+  const bundle = useMemo(() => {
+    if (!dashboard) return undefined;
+    return applyLiveMobileStatusToBundle(dashboard, liveRows);
+  }, [dashboard, liveRows]);
+
+  const connectivityKpis = bundle?.kpis ?? liveConnectivity.kpis;
+  const connectivityFleet = bundle?.fleet ?? liveConnectivity.fleet;
+
+  const kpis = bundle?.kpis;
+  const thefts = bundle?.thefts;
+  const fleet = bundle?.fleet;
 
   const filteredEvents = useMemo(() => {
     if (!thefts) return [];
     return filterTheftEvents(thefts.events, {
       search: "",
       theftType,
-      durationBand,
+      durationBand: "all",
       vehicleType,
       unitCategoryById,
       unitId: selectedUnitId,
@@ -277,10 +350,42 @@ function DashboardContent({ from, to }: Props) {
   }, [
     thefts,
     theftType,
-    durationBand,
     vehicleType,
     unitCategoryById,
     selectedUnitId,
+  ]);
+
+  const kpiTheftEvents = useMemo(() => {
+    if (!thefts) return [];
+    if (kpiCategoryFilter === "all") return thefts.events;
+    return filterTheftEvents(thefts.events, {
+      search: "",
+      theftType: "all",
+      durationBand: "all",
+      vehicleType: kpiCategoryFilter,
+      unitCategoryById: kpiUnitCategoryById,
+    });
+  }, [thefts, kpiCategoryFilter, kpiUnitCategoryById]);
+
+  const kpiMetrics = useMemo(() => {
+    if (!kpis || !thefts || kpiCategoryFilter === "all") return kpis;
+    const rows = filterFleetTableByCategory(
+      thefts.fleetTable,
+      kpiCategoryFilter,
+      kpiUnitCategoryById
+    );
+    const units = filterFleetUnitsByCategory(
+      fleet?.units ?? [],
+      kpiCategoryFilter
+    );
+    return aggregateKpisForCategory(kpis, rows, units, kpiTheftEvents);
+  }, [
+    kpis,
+    thefts,
+    fleet,
+    kpiCategoryFilter,
+    kpiUnitCategoryById,
+    kpiTheftEvents,
   ]);
 
   const selectedUnitMetrics = useMemo(() => {
@@ -288,29 +393,32 @@ function DashboardContent({ from, to }: Props) {
     return thefts.fleetTable.find((r) => r.unitId === selectedUnitId);
   }, [thefts, selectedUnitId]);
 
-  const theftStats = useMemo(() => {
-    if (!kpis) return { volume: 0, count: 0 };
+  const kpiTheftStats = useMemo(() => {
+    if (!kpiMetrics) return { volume: 0, count: 0 };
     if (theftType === "direct") {
       return {
-        volume: kpis.directThefts.volumeLiters,
-        count: kpis.directThefts.count,
+        volume: kpiMetrics.directThefts.volumeLiters,
+        count: kpiMetrics.directThefts.count,
       };
     }
     if (theftType === "return_pipe") {
       return {
-        volume: kpis.returnPipeThefts.volumeLiters,
-        count: kpis.returnPipeThefts.count,
+        volume: kpiMetrics.returnPipeThefts.volumeLiters,
+        count: kpiMetrics.returnPipeThefts.count,
       };
     }
     return {
       volume:
-        kpis.directThefts.volumeLiters + kpis.returnPipeThefts.volumeLiters,
-      count: kpis.directThefts.count + kpis.returnPipeThefts.count,
+        kpiMetrics.directThefts.volumeLiters +
+        kpiMetrics.returnPipeThefts.volumeLiters,
+      count: kpiMetrics.directThefts.count + kpiMetrics.returnPipeThefts.count,
     };
-  }, [kpis, theftType]);
+  }, [kpiMetrics, theftType]);
 
-  const totalTheftLiters = theftStats.volume;
-  const theftEvents = theftStats.count;
+  const totalTheftLiters = kpiTheftStats.volume;
+  const theftEvents = kpiTheftStats.count;
+
+  const fleetCountDisplay = kpiMetrics?.totalUnits ?? 0;
 
   const barData = useMemo(() => {
     if (!thefts) return [];
@@ -318,10 +426,6 @@ function DashboardContent({ from, to }: Props) {
     return [...thefts.fleetTable]
       .filter((r) => {
         if (selectedUnitId && r.unitId !== selectedUnitId) return false;
-        if (vehicleType !== "all") {
-          const unit = fleet?.units.find((u) => u.id === r.unitId);
-          if (unit?.categoryKey !== vehicleType) return false;
-        }
         if (theftType === "direct") return r.directTheftLiters > 0;
         if (theftType === "return_pipe") return r.returnPipeTheftLiters > 0;
         return r.totalTheftLiters > 0;
@@ -346,14 +450,74 @@ function DashboardContent({ from, to }: Props) {
               ? Math.round(r.returnPipeTheftLiters)
               : Math.round(r.totalTheftLiters),
       }));
-  }, [thefts, theftType, vehicleType, fleet, selectedUnitId]);
+  }, [thefts, theftType, selectedUnitId]);
 
-  if (isLoading && !kpis) {
-    return <DashboardSkeleton />;
+  if (isLoading && !kpiMetrics && !liveRows.length) {
+    return (
+      <div className="dashboard-workspace min-h-full">
+        <div className="relative space-y-8 p-6 md:p-8">
+          <div className="grid gap-6 lg:grid-cols-5">
+            <div className="min-w-0 lg:col-span-2 lg:col-start-4">
+              <ConnectivityPanel
+                data={connectivityKpis}
+                fleet={connectivityFleet}
+                filter={connectivityFilter}
+                onFilterChange={setConnectivityFilter}
+                isLive
+              />
+            </div>
+          </div>
+          <CurrentAssetLocationTable
+            rows={liveRows}
+            isLoading={
+              liveLocationsLoading ||
+              (liveLocationsFetching && liveRows.length === 0)
+            }
+            error={
+              liveLocationsError instanceof Error
+                ? liveLocationsError.message
+                : null
+            }
+          />
+          <DashboardSkeleton />
+        </div>
+      </div>
+    );
   }
 
-  if (!kpis || !thefts) {
-    return <DashboardSkeleton />;
+  if (!kpiMetrics || !thefts || !kpis) {
+    return (
+      <div className="dashboard-workspace min-h-full">
+        <div className="relative space-y-8 p-6 md:p-8">
+          <div className="grid gap-6 lg:grid-cols-5">
+            <div className="min-w-0 lg:col-span-2 lg:col-start-4">
+              <ConnectivityPanel
+                data={connectivityKpis}
+                fleet={connectivityFleet}
+                filter={connectivityFilter}
+                onFilterChange={setConnectivityFilter}
+                isLive
+              />
+            </div>
+          </div>
+          <CurrentAssetLocationTable
+            rows={liveRows}
+            isLoading={
+              liveLocationsLoading ||
+              (liveLocationsFetching && liveRows.length === 0)
+            }
+            error={
+              liveLocationsError instanceof Error
+                ? liveLocationsError.message
+                : null
+            }
+          />
+          <p className="text-center text-sm text-slate-600">
+            Sheet metrics are still loading…
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -367,8 +531,6 @@ function DashboardContent({ from, to }: Props) {
           </p>
         )}
 
-        <FleetIntelligenceWorkspace />
-
         {selectedUnit && (
           <VehicleDetailPanel
             unit={selectedUnit}
@@ -381,15 +543,19 @@ function DashboardContent({ from, to }: Props) {
 
         <div className="dash-metrics-grid">
           <MetricCard
-            title="All fleet"
-            value={`${fleet?.summary.total ?? kpis.totalUnits}`}
-            detail="Registered units"
+            title={kpiCategoryFilter !== "all" ? kpiCategoryFilter : "All fleet"}
+            value={`${fleetCountDisplay}`}
+            detail={
+              kpiCategoryFilter !== "all"
+                ? `Units in ${kpiCategoryFilter} category`
+                : "Registered units"
+            }
             tone="accent"
           />
           <MetricCard
             title="Engine hours"
-            value={`${formatNumber(kpis.totalEngineHours, 0)} hrs`}
-            detail={`${formatNumber(kpis.updatingUnits, 0)} units updating now`}
+            value={`${formatNumber(kpiMetrics.totalEngineHours, 0)} hrs`}
+            detail={`${formatNumber(kpiMetrics.updatingUnits, 0)} units updating now`}
             tone="accent"
           />
           <MetricCard
@@ -400,32 +566,32 @@ function DashboardContent({ from, to }: Props) {
           />
           <MetricCard
             title="Consumption rate"
-            value={`${formatNumber(kpis.consumptionKmPerLiter, 2)} km/L`}
+            value={`${formatNumber(kpiMetrics.consumptionKmPerLiter, 2)} km/L`}
             detail="Fleet average fuel efficiency"
             tone="accent"
           />
           <MetricCard
             title="Consumption (Ltrs/Hr)"
-            value={`${formatNumber(kpis.consumptionLitersPerHour, 2)} L/hr`}
-            detail={`${formatNumber(kpis.totalEngineHours, 0)} engine hours in period`}
+            value={`${formatNumber(kpiMetrics.consumptionLitersPerHour, 2)} L/hr`}
+            detail={`${formatNumber(kpiMetrics.totalEngineHours, 0)} engine hours in period`}
             tone="accent"
           />
           <MetricCard
             title="Distance covered"
-            value={`${formatNumber(kpis.totalDistanceKm, 0)} km`}
+            value={`${formatNumber(kpiMetrics.totalDistanceKm, 0)} km`}
             detail="Aggregate fleet mileage"
             tone="neutral"
           />
           <MetricCard
             title="Direct theft"
-            value={`${formatNumber(kpis.directThefts.volumeLiters, 0)} L`}
-            detail={`${kpis.directThefts.count} direct drain events`}
+            value={`${formatNumber(kpiMetrics.directThefts.volumeLiters, 0)} L`}
+            detail={`${kpiMetrics.directThefts.count} direct drain events`}
             tone="danger"
           />
           <MetricCard
             title="Return pipe theft"
-            value={`${formatNumber(kpis.returnPipeThefts.volumeLiters, 0)} L`}
-            detail={`${kpis.returnPipeThefts.count} return-line events`}
+            value={`${formatNumber(kpiMetrics.returnPipeThefts.volumeLiters, 0)} L`}
+            detail={`${kpiMetrics.returnPipeThefts.count} return-line events`}
             tone="warning"
           />
         </div>
@@ -547,12 +713,13 @@ function DashboardContent({ from, to }: Props) {
             )}
           </div>
 
-          <div className="lg:col-span-2">
+          <div className="min-w-0 lg:col-span-2">
             <ConnectivityPanel
-              data={kpis}
-              fleet={fleet}
+              data={connectivityKpis}
+              fleet={connectivityFleet}
               filter={connectivityFilter}
               onFilterChange={setConnectivityFilter}
+              isLive
             />
           </div>
         </div>
@@ -571,14 +738,14 @@ function DashboardContent({ from, to }: Props) {
         <div className="space-y-6">
           <TopViolatorsTable violators={thefts.topViolators} />
           <CurrentAssetLocationTable
-            rows={unitLocations ?? []}
+            rows={liveRows}
             isLoading={
-              unitLocationsLoading ||
-              (unitLocationsFetching && (unitLocations?.length ?? 0) === 0)
+              liveLocationsLoading ||
+              (liveLocationsFetching && liveRows.length === 0)
             }
             error={
-              unitLocationsError instanceof Error
-                ? unitLocationsError.message
+              liveLocationsError instanceof Error
+                ? liveLocationsError.message
                 : null
             }
           />
@@ -589,15 +756,44 @@ function DashboardContent({ from, to }: Props) {
 }
 
 export function FleetDashboard({ from, to }: Props) {
-  const { data: dashboard, isLoading } = useDashboard(from, to);
-  const fleet = dashboard?.fleet;
+  const {
+    data: dashboard,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useDashboard(from, to);
 
   if (isLoading && !dashboard) {
-    return <DashboardSkeleton />;
+    return (
+      <FleetIntelligenceRoot from={from} to={to} fleet={undefined}>
+        <DashboardContent from={from} to={to} />
+      </FleetIntelligenceRoot>
+    );
+  }
+
+  if (isError || !dashboard?.fleet) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Fleet data did not load. Check your Google Sheets connection.";
+
+    return (
+      <div className="flex min-h-[50vh] items-start justify-center p-6 md:p-8">
+        <DataLoadError
+          title="Dashboard could not load"
+          message={message}
+          hints={VERCEL_SHEETS_HINTS}
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      </div>
+    );
   }
 
   return (
-    <FleetIntelligenceRoot from={from} to={to} fleet={fleet}>
+    <FleetIntelligenceRoot from={from} to={to} fleet={dashboard.fleet}>
       <DashboardContent from={from} to={to} />
     </FleetIntelligenceRoot>
   );

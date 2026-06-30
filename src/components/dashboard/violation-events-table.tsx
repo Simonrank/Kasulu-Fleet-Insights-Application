@@ -9,6 +9,7 @@ import {
   incidentDurationSeconds,
   incidentEndTime,
   incidentTypeLabel,
+  violationGroupLabel,
 } from "@/lib/fleet/violations-model";
 import type { DriverIncidentRow } from "@/lib/types";
 
@@ -62,7 +63,7 @@ export function ViolationEventsTable({
     <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-4">
         <h3 className="text-sm font-bold uppercase tracking-wide text-slate-700">
-          {incidentTypeLabel(selectedType).toUpperCase()} · {rows.length}
+          {violationGroupLabel(selectedType).toUpperCase()} · {rows.length}
         </h3>
         <span className="text-xs text-slate-400">{PAGE_SIZE} per page</span>
         <button

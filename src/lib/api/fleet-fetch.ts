@@ -4,6 +4,7 @@ import type {
   SpeedViolationsSummary,
   UnitLatestRow,
 } from "@/lib/types";
+import type { SheetReportingDateRange } from "@/lib/google-sheets/date-range";
 
 function buildQuery(from: string, to: string, extra?: Record<string, string>) {
   return new URLSearchParams({ from, to, ...extra }).toString();
@@ -15,6 +16,11 @@ async function readJson<T>(res: Response, fallback: string): Promise<T> {
     throw new Error(body?.error ?? fallback);
   }
   return res.json() as Promise<T>;
+}
+
+export async function fetchSheetDateRange(): Promise<SheetReportingDateRange> {
+  const res = await fetch("/api/sheets/date-range");
+  return readJson(res, "Failed to load sheet date range");
 }
 
 export async function fetchDashboard(
@@ -43,12 +49,17 @@ export async function fetchSpeedViolations(
   return readJson(res, "Failed to load speeding violations");
 }
 
+export async function fetchLiveUnitLocations(): Promise<UnitLatestRow[]> {
+  const res = await fetch("/api/telematics/unit-locations");
+  return readJson(res, "Failed to load unit locations");
+}
+
+/** @deprecated Use fetchLiveUnitLocations — live telematics is not date-scoped. */
 export async function fetchUnitLocations(
   from: string,
   to: string
 ): Promise<UnitLatestRow[]> {
-  const res = await fetch(
-    `/api/telematics/unit-locations?${buildQuery(from, to)}`
-  );
-  return readJson(res, "Failed to load unit locations");
+  void from;
+  void to;
+  return fetchLiveUnitLocations();
 }

@@ -1,5 +1,6 @@
 import { parseISO, isValid, parse } from "date-fns";
 import type { TheftType } from "@/lib/types";
+import { isUnitUpdating } from "@/lib/fleet/connectivity";
 
 export function normalizeHeader(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "_");
@@ -73,6 +74,22 @@ export function resolveColumn(
     if (index != null) return index;
   }
   return undefined;
+}
+
+/** Find the header row when the sheet was sorted (header may not be row 0). */
+export function detectHeaderRowIndex(rows: string[][]): number {
+  const maxScan = Math.min(rows.length, 25);
+  for (let i = 0; i < maxScan; i++) {
+    const map = headerIndexMap(rows[i] ?? []);
+    const hasMachine =
+      resolveColumn(map, ["machine_id", "machine id", "unit", "unit_name"]) !=
+      null;
+    const hasDate = resolveColumn(map, ["date"]) != null;
+    const hasMetric =
+      resolveColumn(map, ["mileage", "distance_km", "distance"]) != null;
+    if (hasMachine && hasDate && hasMetric) return i;
+  }
+  return 0;
 }
 
 export type ParsedUnitRow = {
@@ -340,15 +357,12 @@ export function internalUnitIdFromSheetKey(name: string): number {
   return Math.abs(hash) || 1;
 }
 
-/** Connectivity status comes from the sheet Comment column */
+/** Connectivity from last message time (≤4h updating, then 4–24h, 24–48h, >48h). */
 export function connectivityFromSheet(
-  comment: string,
+  _comment: string,
   lastMessageAt: Date | null
 ): boolean {
-  const normalized = comment.trim().toLowerCase();
-  if (normalized.includes("not updating")) return false;
-  if (!lastMessageAt) return false;
-  return true;
+  return isUnitUpdating(lastMessageAt);
 }
 
 /** Theft type only when the sheet provides an explicit column value. */
@@ -468,4 +482,23 @@ export function parseKasuluFleetRow(
     ),
     comment,
   };
+}
+
+export function parseKasuluFleetSheet(rawRows: string[][]): {
+  headerRowIndex: number;
+  columnMap: Map<string, number>;
+  rows: ParsedKasuluFleetRow[];
+} {
+  if (!rawRows.length) {
+    return { headerRowIndex: 0, columnMap: new Map(), rows: [] };
+  }
+
+  const headerRowIndex = detectHeaderRowIndex(rawRows);
+  const columnMap = headerIndexMap(rawRows[headerRowIndex] ?? []);
+  const rows = rawRows
+    .slice(headerRowIndex + 1)
+    .map((row) => parseKasuluFleetRow(row, columnMap))
+    .filter((row): row is ParsedKasuluFleetRow => row != null);
+
+  return { headerRowIndex, columnMap, rows };
 }

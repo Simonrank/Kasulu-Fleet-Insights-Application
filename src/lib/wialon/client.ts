@@ -1,5 +1,5 @@
 import type { WialonUnit } from "@/lib/types";
-import { isTelematicsConfigured, wialonConfig } from "@/lib/config/env";
+import { hasWialonToken, isTelematicsConfigured, wialonConfig } from "@/lib/config/env";
 import type {
   WialonReportResult,
   WialonReportTable,
@@ -117,11 +117,12 @@ export class WialonClient {
     intervalFrom: number,
     intervalTo: number,
     reportObjectId: number,
-    remoteExec: number
+    remoteExec: number,
+    report?: { resourceId: number; templateId: number }
   ) {
     return {
-      reportResourceId: Number(wialonConfig.reportResourceId),
-      reportTemplateId: Number(wialonConfig.reportTemplateId),
+      reportResourceId: report?.resourceId ?? Number(wialonConfig.reportResourceId),
+      reportTemplateId: report?.templateId ?? Number(wialonConfig.reportTemplateId),
       reportObjectId,
       reportObjectSecId: 0,
       interval: { from: intervalFrom, to: intervalTo, flags: 0 },
@@ -154,7 +155,8 @@ export class WialonClient {
   async runGroupReport(
     intervalFrom: number,
     intervalTo: number,
-    reportObjectId: number
+    reportObjectId: number,
+    report?: { resourceId: number; templateId: number }
   ): Promise<WialonReportResult> {
     await this.ensureSession();
 
@@ -162,7 +164,7 @@ export class WialonClient {
 
     const sync = await this.request<WialonReportResult>(
       "report/exec_report",
-      this.execReportParams(intervalFrom, intervalTo, reportObjectId, 0)
+      this.execReportParams(intervalFrom, intervalTo, reportObjectId, 0, report)
     );
 
     if (sync.reportResult) {
@@ -171,7 +173,7 @@ export class WialonClient {
 
     await this.request(
       "report/exec_report",
-      this.execReportParams(intervalFrom, intervalTo, reportObjectId, 1)
+      this.execReportParams(intervalFrom, intervalTo, reportObjectId, 1, report)
     );
     await this.waitReportDone();
 
@@ -246,8 +248,11 @@ export class WialonClient {
   }
 }
 
-export function createWialonClient(): WialonClient | null {
-  if (!isTelematicsConfigured()) {
+export function createWialonClient(requireFleetReport = true): WialonClient | null {
+  const configured = requireFleetReport
+    ? isTelematicsConfigured()
+    : hasWialonToken();
+  if (!configured) {
     return null;
   }
   return new WialonClient(wialonConfig.token, wialonConfig.apiUrl);

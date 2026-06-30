@@ -1,10 +1,13 @@
-import { db } from "@/lib/db";
-import { units } from "@/lib/db/schema";
+import { loadUnitIdMap } from "@/lib/db/unit-id-map";
 import { googleSheetsConfig, isGoogleSheetsConfigured } from "@/lib/config/env";
 import { fetchSheetRange } from "@/lib/google-sheets/client";
 import {
-  headerIndexMap,
-  parseKasuluFleetRow,
+  getCategoryRegister,
+  invalidateCategoryRegisterCache,
+  setCategoryRegisterCache,
+} from "@/lib/fleet/category-register";
+import {
+  parseKasuluFleetSheet,
   type ParsedKasuluFleetRow,
 } from "@/lib/google-sheets/parse";
 import type {
@@ -12,14 +15,15 @@ import type {
   ParsedUnitLatestRow,
 } from "@/lib/wialon/parse-report";
 
-const CACHE_TTL_MS = 120_000;
-const UNIT_ID_TTL_MS = 5 * 60_000;
+const CACHE_TTL_MS = 300_000;
 
 export type FleetDataset = {
   rows: ParsedKasuluFleetRow[];
   /** machineId → Postgres unit UUID (when synced) */
   unitIds: Map<string, string>;
   fetchedAt: number;
+  /** Asset name → category from register sheet tab */
+  categoryRegister: Map<string, string>;
   /** Wialon "Unit latest data" snapshot (when available) */
   unitLatestSnapshots?: ParsedUnitLatestRow[];
   /** Wialon "Speedings" rows for the reporting period */
@@ -30,43 +34,38 @@ export type FleetDataset = {
 
 let cache: FleetDataset | null = null;
 let loadPromise: Promise<FleetDataset> | null = null;
-let unitIdCache: { map: Map<string, string>; fetchedAt: number } | null = null;
-
-async function loadUnitIdMap(): Promise<Map<string, string>> {
-  if (
-    unitIdCache &&
-    Date.now() - unitIdCache.fetchedAt < UNIT_ID_TTL_MS
-  ) {
-    return unitIdCache.map;
-  }
-
-  try {
-    const rows = await db.select({ id: units.id, name: units.name }).from(units);
-    const map = new Map(rows.map((r) => [r.name, r.id]));
-    unitIdCache = { map, fetchedAt: Date.now() };
-    return map;
-  } catch {
-    return unitIdCache?.map ?? new Map();
-  }
-}
 
 async function loadFromSheet(): Promise<FleetDataset> {
   if (!isGoogleSheetsConfigured()) {
-    return { rows: [], unitIds: new Map(), fetchedAt: Date.now() };
+    return {
+      rows: [],
+      unitIds: new Map(),
+      categoryRegister: new Map(),
+      fetchedAt: Date.now(),
+    };
   }
 
-  const [rawRows, unitIds] = await Promise.all([
-    fetchSheetRange(googleSheetsConfig.ranges.fleet),
+  const fleetRange = googleSheetsConfig.ranges.fleet;
+
+  const [rawRows, unitIds, categoryRegister] = await Promise.all([
+    fetchSheetRange(fleetRange),
     loadUnitIdMap(),
+    getCategoryRegister(),
   ]);
 
-  const map = headerIndexMap(rawRows[0] ?? []);
-  const rows = rawRows
-    .slice(1)
-    .map((row) => parseKasuluFleetRow(row, map))
-    .filter((row): row is ParsedKasuluFleetRow => row != null);
+  if (categoryRegister.size > 0) {
+    setCategoryRegisterCache(categoryRegister);
+  }
 
-  return { rows, unitIds, fetchedAt: Date.now() };
+  const { rows, headerRowIndex } = parseKasuluFleetSheet(rawRows);
+
+  if (rawRows.length > 2 && rows.length === 0) {
+    console.warn(
+      `[fleet-dataset] Parsed 0 rows from ${rawRows.length} sheet rows (header at index ${headerRowIndex}). Check column headers and GOOGLE_SHEETS_FLEET_RANGE.`
+    );
+  }
+
+  return { rows, unitIds, categoryRegister, fetchedAt: Date.now() };
 }
 
 /** Parsed fleet rows from Google Sheets — shared cache, ~90s TTL. */
@@ -91,24 +90,34 @@ export async function getFleetDataset(): Promise<FleetDataset> {
 
 /** Warm cache without blocking callers (server startup / background refresh). */
 export function prefetchFleetDataset(): void {
+  if (!isGoogleSheetsConfigured()) return;
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) return;
+
   void (async () => {
-    const dataset = await getFleetDataset();
-    const to = new Date();
-    const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
-    from.setHours(0, 0, 0, 0);
-    to.setHours(23, 59, 59, 999);
-    const { getDashboardBundle } = await import(
-      "@/lib/google-sheets/dashboard-cache"
-    );
-    const { getUtilizationBundle } = await import(
-      "@/lib/google-sheets/utilization-cache"
-    );
-    getDashboardBundle(dataset, from, to);
-    getUtilizationBundle(dataset, from, to);
+    try {
+      const dataset = await getFleetDataset();
+      const { buildSheetReportingDateRange } = await import(
+        "@/lib/google-sheets/date-range"
+      );
+      const sheetRange = buildSheetReportingDateRange(dataset.rows);
+      if (!sheetRange) return;
+      const from = new Date(sheetRange.defaultFrom);
+      const to = new Date(sheetRange.defaultTo);
+      const { getDashboardBundle } = await import(
+        "@/lib/google-sheets/dashboard-cache"
+      );
+      const { getUtilizationBundle } = await import(
+        "@/lib/google-sheets/utilization-cache"
+      );
+      getDashboardBundle(dataset, from, to);
+      getUtilizationBundle(dataset, from, to);
+    } catch {
+      // Best-effort warm — credentials may be unavailable during CI/build.
+    }
   })();
 }
 
 export function invalidateFleetDatasetCache(): void {
   cache = null;
+  invalidateCategoryRegisterCache();
 }

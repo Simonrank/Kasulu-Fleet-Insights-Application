@@ -5,9 +5,8 @@ import { googleSheetsConfig, isGoogleSheetsConfigured } from "@/lib/config/env";
 import { fetchSheetRange } from "@/lib/google-sheets/client";
 import {
   connectivityFromSheet,
-  headerIndexMap,
   internalUnitIdFromSheetKey,
-  parseKasuluFleetRow,
+  parseKasuluFleetSheet,
 } from "@/lib/google-sheets/parse";
 import { upsertDailyMetric, upsertFuelTheftEvent } from "@/lib/wialon/sync";
 
@@ -40,18 +39,13 @@ async function syncKasuluFleetSheet(): Promise<{
   metricsSynced: number;
   rowsSkipped: number;
 }> {
-  const rows = await fetchSheetRange(googleSheetsConfig.ranges.fleet);
-  if (rows.length < 2) {
+  const rawRows = await fetchSheetRange(googleSheetsConfig.ranges.fleet);
+  if (rawRows.length < 2) {
     return { unitsSynced: 0, fuelEventsSynced: 0, metricsSynced: 0, rowsSkipped: 0 };
   }
 
   const cutoff = syncDaysCutoff();
-  const map = headerIndexMap(rows[0]);
-
-  const parsedRows = rows
-    .slice(1)
-    .map((row) => parseKasuluFleetRow(row, map))
-    .filter((row): row is NonNullable<typeof row> => row != null);
+  const { rows: parsedRows } = parseKasuluFleetSheet(rawRows);
 
   const latestByMachine = new Map<string, (typeof parsedRows)[number]>();
   for (const row of parsedRows) {

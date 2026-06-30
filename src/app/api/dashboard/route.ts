@@ -1,16 +1,31 @@
 import { NextResponse } from "next/server";
-import { triggerGoogleSheetsSyncIfStale } from "@/lib/google-sheets/ensure-sync";
 import { prefetchFleetDataset } from "@/lib/google-sheets/fleet-dataset";
-import { isGoogleSheetsConfigured, isTelematicsConfigured } from "@/lib/config/env";
+import { hasGoogleSheetsCredentials } from "@/lib/google-sheets/client";
+import { isGoogleSheetsConfigured } from "@/lib/config/env";
 import { loadDashboardBundle } from "@/lib/dashboard/load-bundle";
-import { prefetchTelematicsSnapshot } from "@/lib/telematics/snapshot";
 import { parseDateRange } from "@/lib/utils";
+
+/** Large sheets can exceed Vercel's default 10s limit — allow up to 60s on Pro. */
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   try {
     if (!isGoogleSheetsConfigured()) {
       return NextResponse.json(
-        { error: "Google Sheets is not configured." },
+        {
+          error:
+            "Google Sheets is not configured. Set GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_SHEETS_FLEET_RANGE in your deployment environment.",
+        },
+        { status: 503 }
+      );
+    }
+
+    if (!hasGoogleSheetsCredentials()) {
+      return NextResponse.json(
+        {
+          error:
+            "Google Sheets credentials are missing. Set GOOGLE_SERVICE_ACCOUNT_JSON (or GOOGLE_SERVICE_ACCOUNT_KEY) to the full service account JSON — not a file path.",
+        },
         { status: 503 }
       );
     }
@@ -21,17 +36,12 @@ export async function GET(request: Request) {
       searchParams.get("to")
     );
 
-    triggerGoogleSheetsSyncIfStale();
     prefetchFleetDataset();
-
-    if (isTelematicsConfigured()) {
-      prefetchTelematicsSnapshot(from, to);
-    }
 
     const data = await loadDashboardBundle(from, to);
     return NextResponse.json(data, {
       headers: {
-        "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+        "Cache-Control": "private, max-age=120, stale-while-revalidate=300",
       },
     });
   } catch (error) {

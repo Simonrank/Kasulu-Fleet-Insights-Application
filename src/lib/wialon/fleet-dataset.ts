@@ -1,6 +1,4 @@
-import { startOfDay } from "date-fns";
-import { db } from "@/lib/db";
-import { units } from "@/lib/db/schema";
+import { loadUnitIdMap } from "@/lib/db/unit-id-map";
 import { wialonConfig } from "@/lib/config/env";
 import { WialonClient, createWialonClient } from "@/lib/wialon/client";
 import {
@@ -16,12 +14,15 @@ import type { ParsedUnitLatestRow } from "@/lib/wialon/parse-report";
 import type { WialonReportTable } from "@/lib/wialon/report-types";
 import type { ParsedKasuluFleetRow } from "@/lib/google-sheets/parse";
 import type { FleetDataset } from "@/lib/google-sheets/fleet-dataset";
+import { getCategoryRegister } from "@/lib/fleet/category-register";
 import {
   clampDarDays,
   darDayToDate,
   wialonUnixDayInterval,
   type DarCalendarDay,
 } from "@/lib/wialon/day-interval";
+import { withWialonSessionLock } from "@/lib/wialon/session-lock";
+import { startOfDay } from "date-fns";
 
 const CACHE_TTL_MS = 5 * 60_000;
 const SKIP_TABLE_LABELS = new Set(["fuel"]);
@@ -32,7 +33,7 @@ type CacheEntry = {
 };
 
 let cache: CacheEntry | null = null;
-let loadPromise: Promise<FleetDataset> | null = null;
+let loadPromise: { key: string; promise: Promise<FleetDataset> } | null = null;
 
 function rangeKey(from: Date, to: Date): string {
   return `${startOfDay(from).toISOString()}|${startOfDay(to).toISOString()}`;
@@ -76,15 +77,6 @@ function pickFleetTable(tables: WialonReportTable[]): WialonReportTable | null {
       return !SKIP_TABLE_LABELS.has(label) && (table.rows ?? 0) > 0;
     }) ?? null
   );
-}
-
-async function loadUnitIdMap(): Promise<Map<string, string>> {
-  try {
-    const rows = await db.select({ id: units.id, name: units.name }).from(units);
-    return new Map(rows.map((row) => [row.name, row.id]));
-  } catch {
-    return new Map();
-  }
 }
 
 function pickUnitLatestTable(
@@ -203,60 +195,68 @@ async function fetchUnitLatestFromTables(
 
 
 async function loadFromWialon(from: Date, to: Date): Promise<FleetDataset> {
-  const client = createWialonClient();
-  const groupId = Number(wialonConfig.reportGroupId);
+  return withWialonSessionLock(async () => {
+    const client = createWialonClient();
+    const groupId = Number(wialonConfig.reportGroupId);
 
-  if (!client) {
-    throw new Error("Live telematics is not configured");
-  }
-  if (!groupId || !wialonConfig.reportResourceId || !wialonConfig.reportTemplateId) {
-    throw new Error(
-      "Telematics report IDs missing. Set WIALON_REPORT_RESOURCE_ID, WIALON_REPORT_TEMPLATE_ID, and WIALON_REPORT_GROUP_ID."
-    );
-  }
-
-  const days = clampDarDays(from, to, wialonConfig.reportMaxDays);
-  const rows: ParsedKasuluFleetRow[] = [];
-  const speedViolations: ParsedSpeedingRow[] = [];
-  const wialonViolations: ParsedWialonViolationRow[] = [];
-  let unitLatestSnapshots: ParsedUnitLatestRow[] = [];
-
-  try {
-    await client.setLocale();
-
-    for (let i = 0; i < days.length; i++) {
-      const day = days[i];
-      const reportDate = darDayToDate(day);
-      const report = await fetchDayReport(client, day, groupId);
-      rows.push(...report.rows);
-      speedViolations.push(
-        ...(await fetchSpeedingsFromTables(client, report.tables, reportDate))
-      );
-      wialonViolations.push(
-        ...(await fetchViolationsFromTables(client, report.tables))
-      );
-
-      if (i === days.length - 1) {
-        unitLatestSnapshots = await fetchUnitLatestFromTables(
-          client,
-          report.tables
-        );
-      }
+    if (!client) {
+      throw new Error("Live telematics is not configured");
     }
-  } finally {
-    await client.logout();
-  }
+    if (
+      !groupId ||
+      !wialonConfig.reportResourceId ||
+      !wialonConfig.reportTemplateId
+    ) {
+      throw new Error(
+        "Telematics report IDs missing. Set WIALON_REPORT_RESOURCE_ID, WIALON_REPORT_TEMPLATE_ID, and WIALON_REPORT_GROUP_ID."
+      );
+    }
 
-  const unitIds = await loadUnitIdMap();
+    const days = clampDarDays(from, to, wialonConfig.reportMaxDays);
+    const rows: ParsedKasuluFleetRow[] = [];
+    const speedViolations: ParsedSpeedingRow[] = [];
+    const wialonViolations: ParsedWialonViolationRow[] = [];
+    let unitLatestSnapshots: ParsedUnitLatestRow[] = [];
 
-  return {
-    rows,
-    unitIds,
-    fetchedAt: Date.now(),
-    unitLatestSnapshots,
-    speedViolations,
-    wialonViolations,
-  };
+    try {
+      await client.setLocale();
+
+      for (let i = 0; i < days.length; i++) {
+        const day = days[i];
+        const reportDate = darDayToDate(day);
+        const report = await fetchDayReport(client, day, groupId);
+        rows.push(...report.rows);
+        speedViolations.push(
+          ...(await fetchSpeedingsFromTables(client, report.tables, reportDate))
+        );
+        wialonViolations.push(
+          ...(await fetchViolationsFromTables(client, report.tables))
+        );
+
+        if (i === days.length - 1) {
+          unitLatestSnapshots = await fetchUnitLatestFromTables(
+            client,
+            report.tables
+          );
+        }
+      }
+    } finally {
+      await client.logout();
+    }
+
+    const unitIds = await loadUnitIdMap();
+    const categoryRegister = await getCategoryRegister();
+
+    return {
+      rows,
+      unitIds,
+      fetchedAt: Date.now(),
+      categoryRegister,
+      unitLatestSnapshots,
+      speedViolations,
+      wialonViolations,
+    };
+  });
 }
 
 /** Live fleet rows from Wialon reports for the selected reporting period. */
@@ -270,18 +270,23 @@ export async function getWialonFleetDataset(
     return cache.dataset;
   }
 
-  if (!loadPromise) {
-    loadPromise = loadFromWialon(from, to)
-      .then((dataset) => {
-        cache = { dataset, rangeKey: key };
-        return dataset;
-      })
-      .finally(() => {
-        loadPromise = null;
-      });
+  if (loadPromise?.key === key) {
+    return loadPromise.promise;
   }
 
-  return loadPromise;
+  const promise = loadFromWialon(from, to)
+    .then((dataset) => {
+      cache = { dataset, rangeKey: key };
+      return dataset;
+    })
+    .finally(() => {
+      if (loadPromise?.key === key) {
+        loadPromise = null;
+      }
+    });
+
+  loadPromise = { key, promise };
+  return promise;
 }
 
 export function invalidateWialonFleetDatasetCache(): void {

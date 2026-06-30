@@ -45,15 +45,27 @@ function parseNumbersFromText(text: string): {
 } {
   const thresholdMatch = text.match(/above\s+([\d.]+)\s*km/i);
   const speedMatch = text.match(/speed of\s+([\d.]+)\s*km/i);
-  const volumeMatch = text.match(/drain of ([\d.]+)\s*l/i);
   return {
-    value: speedMatch
-      ? parseFloat(speedMatch[1])
-      : volumeMatch
-        ? parseFloat(volumeMatch[1])
-        : null,
+    value: speedMatch ? parseFloat(speedMatch[1]) : null,
     threshold: thresholdMatch ? parseFloat(thresholdMatch[1]) : null,
   };
+}
+
+/** Fuel drains belong on the Fuel Thefts tab, not driver incidents. */
+export function isFuelDrainViolationText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("fuel drain") ||
+    lower.includes("tank drain") ||
+    /drain\s+of\s+[\d.]+\s*l/i.test(lower) ||
+    (lower.includes("drain") && lower.includes("fuel"))
+  );
+}
+
+export function isFuelDrainViolation(row: DriverIncidentRow): boolean {
+  return isFuelDrainViolationText(
+    `${row.description ?? ""} ${incidentTypeLabel(row.incidentType)}`
+  );
 }
 
 export function wialonViolationsToIncidents(
@@ -63,7 +75,9 @@ export function wialonViolationsToIncidents(
   const incidents: DriverIncidentRow[] = [];
 
   for (const [index, row] of rows.entries()) {
-    const { key, label } = violationTypeFromText(row.violationText);
+    if (isFuelDrainViolationText(row.violationText)) continue;
+
+    const { key } = violationTypeFromText(row.violationText);
     const numbers = parseNumbersFromText(row.violationText);
     const occurredAt =
       row.occurredAt?.toISOString() ??
@@ -246,6 +260,89 @@ export type ViolationTypeSummary = {
   count: number;
   totalDurationSeconds: number;
 };
+
+/** Speed bands for overview cards — ordered high to low. */
+export const SPEED_VIOLATION_BUCKETS = [
+  { key: "speed_gte_80", label: "≥ 80 km/h", minInclusive: 80 },
+  { key: "speed_60_80", label: "60–80 km/h", minInclusive: 60, maxExclusive: 80 },
+  { key: "speed_35_60", label: "35–60 km/h", minInclusive: 35, maxExclusive: 60 },
+  { key: "speed_lt_35", label: "< 35 km/h", maxExclusive: 35 },
+] as const;
+
+export const OTHER_VIOLATIONS_GROUP = "other_violations";
+
+/** Parsed speed (km/h) when the incident row represents a speed event. */
+export function incidentSpeedKmh(row: DriverIncidentRow): number | null {
+  if (row.value == null || row.value <= 0) return null;
+
+  if (row.source === "live_speedings") {
+    return row.value;
+  }
+
+  if (row.source === "live_violations") {
+    const desc = row.description ?? "";
+    if (row.threshold != null || /speed of\s+[\d.]+/i.test(desc)) {
+      return row.value;
+    }
+  }
+
+  return null;
+}
+
+export function speedBucketKey(speedKmh: number): string {
+  if (speedKmh >= 80) return "speed_gte_80";
+  if (speedKmh >= 60) return "speed_60_80";
+  if (speedKmh >= 35) return "speed_35_60";
+  return "speed_lt_35";
+}
+
+export function violationGroupKey(row: DriverIncidentRow): string {
+  const speed = incidentSpeedKmh(row);
+  if (speed != null) return speedBucketKey(speed);
+  return OTHER_VIOLATIONS_GROUP;
+}
+
+export function violationGroupLabel(groupKey: string): string {
+  const bucket = SPEED_VIOLATION_BUCKETS.find((b) => b.key === groupKey);
+  if (bucket) return bucket.label;
+  if (groupKey === OTHER_VIOLATIONS_GROUP) return "Other violations";
+  return incidentTypeLabel(groupKey);
+}
+
+export function matchesViolationGroup(
+  row: DriverIncidentRow,
+  groupKey: string
+): boolean {
+  return violationGroupKey(row) === groupKey;
+}
+
+const GROUP_CARD_ORDER = [
+  ...SPEED_VIOLATION_BUCKETS.map((b) => b.key),
+  OTHER_VIOLATIONS_GROUP,
+];
+
+export function summarizeViolationGroups(
+  incidents: DriverIncidentRow[]
+): ViolationTypeSummary[] {
+  const byGroup = new Map<string, ViolationTypeSummary>();
+
+  for (const row of incidents) {
+    const key = violationGroupKey(row);
+    const existing = byGroup.get(key) ?? {
+      type: key,
+      label: violationGroupLabel(key),
+      count: 0,
+      totalDurationSeconds: 0,
+    };
+    existing.count += 1;
+    existing.totalDurationSeconds += incidentDurationSeconds(row);
+    byGroup.set(key, existing);
+  }
+
+  return GROUP_CARD_ORDER.filter((key) => byGroup.has(key)).map(
+    (key) => byGroup.get(key)!
+  );
+}
 
 export function violationTypeColor(type: string, index = 0): string {
   return colorFromKey(type, index);

@@ -1,10 +1,12 @@
 import { startOfDay } from "date-fns";
+import { tallyConnectivityFromLastMessages } from "@/lib/fleet/connectivity";
 import {
-  connectivityFromSheet,
   internalUnitIdFromSheetKey,
   sheetTheftType,
   type ParsedKasuluFleetRow,
 } from "@/lib/google-sheets/parse";
+import { latestRowByMachineDate } from "@/lib/google-sheets/latest-by-machine";
+import { rowInReportingDayRange } from "@/lib/google-sheets/period-filter";
 import type {
   DashboardBundle,
   FleetSummary,
@@ -15,17 +17,17 @@ import type {
   TheftType,
   UnitPerformance,
 } from "@/lib/types";
+import {
+  tallyFleetByCategory,
+  tallyFleetStatus,
+} from "@/lib/fleet/categories";
+import { resolveAssetCategory } from "@/lib/fleet/asset-names";
 import { averageSheetMetric } from "@/lib/utils";
 import type { FleetDataset } from "@/lib/google-sheets/fleet-dataset";
 import { buildUnitLatestRows } from "@/lib/fleet/unit-latest";
 import {
   buildSpeedViolationsSummary,
 } from "@/lib/fleet/speed-violations-analytics";
-
-function inRange(date: Date, from: Date, to: Date): boolean {
-  const d = startOfDay(date).getTime();
-  return d >= startOfDay(from).getTime() && d <= startOfDay(to).getTime();
-}
 
 function resolveUnitId(machineId: string, unitIds: Map<string, string>): string {
   return unitIds.get(machineId) ?? machineId;
@@ -40,17 +42,11 @@ export function buildDashboardFromSheet(
   from: Date,
   to: Date
 ): DashboardBundle {
-  const { rows, unitIds, fetchedAt } = dataset;
+  const { rows, unitIds, fetchedAt, categoryRegister } = dataset;
 
-  const latestByMachine = new Map<string, ParsedKasuluFleetRow>();
-  for (const row of rows) {
-    const prev = latestByMachine.get(row.machineId);
-    if (!prev || row.date > prev.date) {
-      latestByMachine.set(row.machineId, row);
-    }
-  }
+  const latestByMachine = latestRowByMachineDate(rows);
 
-  const periodRows = rows.filter((r) => inRange(r.date, from, to));
+  const periodRows = rows.filter((r) => rowInReportingDayRange(r.date, from, to));
 
   let totalDistanceKm = 0;
   let totalEngineHours = 0;
@@ -104,7 +100,11 @@ export function buildDashboardFromSheet(
       fillingVolume += row.fuelFilledLiters;
     }
 
-    const categoryLabelValue = row.category?.trim() || null;
+    const categoryLabelValue = resolveAssetCategory(
+      row.machineId,
+      row.category,
+      categoryRegister
+    );
     const unitId = resolveUnitId(row.machineId, unitIds);
 
     let agg = unitAgg.get(row.machineId);
@@ -137,6 +137,9 @@ export function buildDashboardFromSheet(
     if (row.productiveHours != null) agg.productiveHours += row.productiveHours;
     if (row.kmPerLiter > 0) agg.kmPerLiter.push(row.kmPerLiter);
     if (row.litersPerHour > 0) agg.litersPerHour.push(row.litersPerHour);
+    if (!agg.categoryLabel && categoryLabelValue) {
+      agg.categoryLabel = categoryLabelValue;
+    }
 
     if (row.fuelTheftLiters > 0) {
       const typed = sheetTheftType(row.theftType);
@@ -182,29 +185,30 @@ export function buildDashboardFromSheet(
     (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
   );
 
-  let updatingUnits = 0;
-
   const fleetUnits: FleetSummary["units"] = [];
 
   for (const [machineId, latest] of latestByMachine) {
-    const isOnline = connectivityFromSheet(latest.comment, latest.lastMessageAt);
-    if (isOnline) updatingUnits++;
-
-    const categoryDisplay = latest.category?.trim() || "—";
+    const categoryDisplay =
+      resolveAssetCategory(
+        machineId,
+        latest.category,
+        categoryRegister
+      ) ?? "—";
 
     fleetUnits.push({
       id: resolveUnitId(machineId, unitIds),
       wialonId: internalUnitIdFromSheetKey(machineId),
       name: machineId,
       plateNumber: machineId.split("—")[0]?.trim() ?? machineId,
-      vehicleType: latest.category,
+      vehicleType: categoryDisplay === "—" ? latest.category : categoryDisplay,
       category: categoryDisplay,
       categoryKey: categoryDisplay === "—" ? null : categoryDisplay,
       driverName: null,
       status: "active",
-      isOnline,
-      isUpdating: isOnline,
-      lastMessageAt: latest.lastMessageAt?.toISOString() ?? null,
+      isOnline: false,
+      isUpdating: false,
+      connectivityBand: "unknown",
+      lastMessageAt: null,
       lastLat: null,
       lastLon: null,
       lastSpeedKmh: null,
@@ -212,6 +216,11 @@ export function buildDashboardFromSheet(
   }
 
   fleetUnits.sort((a, b) => a.name.localeCompare(b.name));
+
+  const updatingUnits = 0;
+  const connectivityBands = tallyConnectivityFromLastMessages(
+    fleetUnits.map(() => null)
+  );
 
   const totalUnits = latestByMachine.size;
   const utilizationPercent =
@@ -241,6 +250,7 @@ export function buildDashboardFromSheet(
     updatingUnits,
     nonUpdatingUnits: totalUnits - updatingUnits,
     totalUnits,
+    connectivityBands,
     directThefts: { count: directTheftCount, volumeLiters: directTheftVolume },
     returnPipeThefts: {
       count: returnPipeTheftCount,
@@ -258,9 +268,10 @@ export function buildDashboardFromSheet(
       category: u.categoryLabel ?? "—",
       distanceKm: u.distanceKm,
       fuelConsumedLiters: u.fuelConsumedLiters,
-      directTheftLiters: u.directTheftLiters,
+      directTheftLiters: u.directTheftLiters + u.untypedTheftLiters,
       returnPipeTheftLiters: u.returnPipeTheftLiters,
-      totalTheftLiters: u.directTheftLiters + u.returnPipeTheftLiters,
+      totalTheftLiters:
+        u.directTheftLiters + u.returnPipeTheftLiters + u.untypedTheftLiters,
       kmPerLiter: avgKm,
       litersPerHour: avgLph,
       hoursPerLiter: avgKm > 0 ? 1 / avgKm : 0,
@@ -310,8 +321,7 @@ export function buildDashboardFromSheet(
     }))
     .sort((a, b) => b.totalLiters - a.totalLiters);
 
-  const heavyMachines = 0;
-  const lightVehicles = 0;
+  const statusCounts = tallyFleetStatus(fleetUnits);
 
   const totalDrainVolume = directTheftVolume + returnPipeTheftVolume;
 
@@ -351,13 +361,10 @@ export function buildDashboardFromSheet(
   const fleet: FleetSummary = {
     summary: {
       total: totalUnits,
-      heavyMachines,
-      lightVehicles,
+      byCategory: tallyFleetByCategory(fleetUnits),
       updating: updatingUnits,
       nonUpdating: totalUnits - updatingUnits,
-      active: totalUnits,
-      inactive: 0,
-      maintenance: 0,
+      ...statusCounts,
     },
     units: fleetUnits,
   };

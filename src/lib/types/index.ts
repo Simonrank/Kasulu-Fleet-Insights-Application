@@ -1,6 +1,3 @@
-import type { FleetCategory } from "@/lib/fleet/categories";
-
-export type { FleetCategory };
 export type TheftFilter = "direct" | "return_pipe" | "all";
 export type TheftType = "direct" | "return_pipe";
 export type DurationBand = "all" | "short" | "medium" | "long" | "extended";
@@ -70,6 +67,13 @@ export type KpiSummary = {
   updatingUnits: number;
   nonUpdatingUnits: number;
   totalUnits: number;
+  connectivityBands: {
+    updating: number;
+    staleOver4Hours: number;
+    staleOver24Hours: number;
+    staleOver48Hours: number;
+    unknown: number;
+  };
   directThefts: { count: number; volumeLiters: number };
   returnPipeThefts: { count: number; volumeLiters: number };
   period: { from: string; to: string };
@@ -102,6 +106,8 @@ export type UtilizationSummary = {
   period: { from: string; to: string };
 };
 
+import type { ConnectivityBand } from "@/lib/fleet/connectivity";
+
 export type FleetUnitRow = {
   id: string;
   wialonId: number;
@@ -114,6 +120,7 @@ export type FleetUnitRow = {
   status: string;
   isOnline: boolean;
   isUpdating: boolean;
+  connectivityBand: ConnectivityBand;
   lastMessageAt: string | null;
   lastLat: number | null;
   lastLon: number | null;
@@ -123,8 +130,7 @@ export type FleetUnitRow = {
 export type FleetSummary = {
   summary: {
     total: number;
-    heavyMachines: number;
-    lightVehicles: number;
+    byCategory: Record<string, number>;
     updating: number;
     nonUpdating: number;
     active: number;
@@ -134,7 +140,14 @@ export type FleetSummary = {
   units: FleetUnitRow[];
 };
 
-export type ConnectivityFilter = "updating" | "non_updating" | "all";
+export type ConnectivityFilter =
+  | "updating"
+  | "stale_over_4h"
+  | "stale_over_24h"
+  | "stale_over_48h"
+  | "unknown"
+  | "non_updating"
+  | "all";
 
 export type UnitProblem = {
   id: string;

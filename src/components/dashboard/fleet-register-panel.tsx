@@ -10,16 +10,16 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { TabWorkspace } from "@/components/dashboard/tab-workspace";
-import { VehicleSearch } from "@/components/dashboard/vehicle-search";
+import { useTheftFilter } from "@/context/theft-filter";
 import { Badge } from "@/components/ui/badge";
 import {
-  DURATION_BANDS,
-  buildCategoryFilterOptions,
-  type VehicleTypeFilter,
-} from "@/lib/fleet/theft-filters";
+  connectivityBandBadgeVariant,
+  connectivityBandLabel,
+} from "@/lib/fleet/connectivity";
+import { type VehicleTypeFilter } from "@/lib/fleet/theft-filters";
+import { buildUnitCategoryMaps } from "@/lib/fleet/unit-category-maps";
 import { cn } from "@/lib/utils";
-import type { DurationBand, FleetSummary, FleetUnitRow, TheftFilter } from "@/lib/types";
+import type { FleetSummary, FleetUnitRow } from "@/lib/types";
 
 const PAGE_SIZE = 10;
 
@@ -27,21 +27,14 @@ type FleetFilterContextValue = {
   from: string;
   to: string;
   fleet: FleetSummary;
-  searchQuery: string;
-  setSearchQuery: (value: string) => void;
   selectedUnitId: string | null;
   selectedUnit: FleetUnitRow | null;
   selectUnit: (unitId: string) => void;
   clearVehicleSelection: () => void;
   vehicleType: VehicleTypeFilter;
-  setVehicleType: (value: VehicleTypeFilter) => void;
-  theftType: TheftFilter;
-  setTheftType: (value: TheftFilter) => void;
-  durationBand: DurationBand;
-  setDurationBand: (value: DurationBand) => void;
+  theftType: ReturnType<typeof useTheftFilter>["theftType"];
   displayedUnits: FleetUnitRow[];
   unitCategoryById: Map<string, FleetUnitRow["categoryKey"]>;
-  categoryFilterOptions: { value: VehicleTypeFilter; label: string }[];
   hasActiveFilters: boolean;
 };
 
@@ -65,168 +58,86 @@ type RootProps = {
 };
 
 export function FleetIntelligenceRoot({ from, to, fleet, children }: RootProps) {
-  const [searchQuery, setSearchQuery] = useState("");
+  const { theftType } = useTheftFilter();
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
-  const [vehicleType, setVehicleType] = useState<VehicleTypeFilter>("all");
-  const [theftType, setTheftType] = useState<TheftFilter>("all");
-  const [durationBand, setDurationBand] = useState<DurationBand>("all");
+  const vehicleType: VehicleTypeFilter = "all";
 
-  const categoryFilterOptions = useMemo(
-    () =>
-      fleet
-        ? buildCategoryFilterOptions(fleet.units)
-        : [{ value: "all" as const, label: "All categories" }],
-    [fleet]
-  );
+  const emptyFleet: FleetSummary = {
+    units: [],
+    summary: {
+      total: 0,
+      byCategory: {},
+      updating: 0,
+      nonUpdating: 0,
+      active: 0,
+      inactive: 0,
+      maintenance: 0,
+    },
+  };
+
+  const resolvedFleet = fleet ?? emptyFleet;
 
   const unitCategoryById = useMemo(() => {
-    if (!fleet) return new Map<string, FleetUnitRow["categoryKey"]>();
-    return new Map(fleet.units.map((u) => [u.id, u.categoryKey]));
-  }, [fleet]);
+    return buildUnitCategoryMaps(
+      resolvedFleet.units.map((unit) => ({
+        id: unit.id,
+        categoryKey: unit.categoryKey,
+        name: unit.name,
+        plateNumber: unit.plateNumber,
+      }))
+    ).unitCategoryById;
+  }, [resolvedFleet.units]);
 
   const selectedUnit = useMemo(() => {
-    if (!fleet || !selectedUnitId) return null;
-    return fleet.units.find((u) => u.id === selectedUnitId) ?? null;
-  }, [fleet, selectedUnitId]);
+    if (!selectedUnitId) return null;
+    return resolvedFleet.units.find((u) => u.id === selectedUnitId) ?? null;
+  }, [resolvedFleet.units, selectedUnitId]);
 
   const selectUnit = (unitId: string) => {
     setSelectedUnitId(unitId);
-    setSearchQuery("");
   };
 
   const clearVehicleSelection = () => {
     setSelectedUnitId(null);
-    setSearchQuery("");
   };
 
   const displayedUnits = useMemo(() => {
-    if (!fleet) return [];
-
     if (selectedUnitId) {
-      const unit = fleet.units.find((u) => u.id === selectedUnitId);
+      const unit = resolvedFleet.units.find((u) => u.id === selectedUnitId);
       if (!unit) return [];
       if (vehicleType !== "all" && unit.categoryKey !== vehicleType) return [];
       return [unit];
     }
 
-    let units = fleet.units;
+    let units = resolvedFleet.units;
     if (vehicleType !== "all") {
       units = units.filter((u) => u.categoryKey === vehicleType);
     }
     return units;
-  }, [fleet, vehicleType, selectedUnitId]);
+  }, [resolvedFleet.units, vehicleType, selectedUnitId]);
 
   const hasActiveFilters =
-    selectedUnitId !== null ||
-    vehicleType !== "all" ||
-    theftType !== "all" ||
-    durationBand !== "all";
-
-  if (!fleet) {
-    return <div className="h-48 animate-pulse rounded-2xl bg-slate-200/60" />;
-  }
+    selectedUnitId !== null || theftType !== "all";
 
   return (
     <FleetFilterContext.Provider
       value={{
         from,
         to,
-        fleet,
-        searchQuery,
-        setSearchQuery,
+        fleet: resolvedFleet,
         selectedUnitId,
         selectedUnit,
         selectUnit,
         clearVehicleSelection,
         vehicleType,
-        setVehicleType,
         theftType,
-        setTheftType,
-        durationBand,
-        setDurationBand,
         displayedUnits,
         unitCategoryById,
-        categoryFilterOptions,
         hasActiveFilters,
       }}
     >
       {children}
     </FleetFilterContext.Provider>
-  );
-}
-
-export function FleetIntelligenceWorkspace() {
-  const {
-    from,
-    to,
-    vehicleType,
-    setVehicleType,
-    theftType,
-    setTheftType,
-    durationBand,
-    setDurationBand,
-    displayedUnits,
-    fleet,
-    hasActiveFilters,
-    selectedUnit,
-    categoryFilterOptions,
-  } = useFleetIntelligenceFilters();
-
-  const selectedLabel =
-    selectedUnit?.plateNumber ??
-    selectedUnit?.name.split("—")[0]?.trim() ??
-    selectedUnit?.name;
-
-  return (
-    <TabWorkspace
-      title="Kasulu fleet intelligence"
-      from={from}
-      to={to}
-      searchSlot={<VehicleSearch />}
-      filters={[
-        {
-          id: "vehicle-type",
-          label: "Category",
-          value: vehicleType,
-          onChange: (v) => setVehicleType(v as VehicleTypeFilter),
-          placeholder: "All categories",
-          options: categoryFilterOptions.map((o) => ({
-            value: o.value,
-            label: o.label,
-          })),
-        },
-        {
-          id: "theft-type",
-          label: "Theft type",
-          value: theftType,
-          onChange: (v) => setTheftType(v as TheftFilter),
-          placeholder: "All theft types",
-          options: [
-            { value: "all", label: "All theft types" },
-            { value: "direct", label: "Direct thefts only" },
-            { value: "return_pipe", label: "Return pipe only" },
-          ],
-        },
-        {
-          id: "duration-band",
-          label: "Duration band",
-          value: durationBand,
-          onChange: (v) => setDurationBand(v as DurationBand),
-          placeholder: "All duration bands",
-          options: DURATION_BANDS.map((b) => ({
-            value: b.value,
-            label: b.label,
-          })),
-        },
-      ]}
-      resultSummary={
-        selectedUnit
-          ? `Showing ${selectedLabel} · fleet register filtered to 1 unit`
-          : hasActiveFilters
-            ? `Fleet register: ${displayedUnits.length} of ${fleet.units.length} units match`
-            : undefined
-      }
-    />
   );
 }
 
@@ -335,8 +246,8 @@ export function FleetRegisterTable() {
                   </Badge>
                 </td>
                 <td className="py-2.5 pr-4">
-                  <Badge variant={unit.isUpdating ? "success" : "destructive"}>
-                    {unit.isUpdating ? "Updating" : "Non-updating"}
+                  <Badge variant={connectivityBandBadgeVariant(unit.connectivityBand)}>
+                    {connectivityBandLabel(unit.connectivityBand)}
                   </Badge>
                 </td>
                 <td className="py-2.5 text-dash-muted">

@@ -15,13 +15,15 @@ import type {
   TheftFilter,
   TheftType,
 } from "@/lib/types";
-import { KPI_TARGETS, averageSheetMetric } from "@/lib/utils";
 import {
-  resolveFleetCategory,
-  categoryLabel,
-  CATEGORY_LABELS,
-  type FleetCategory,
+  connectivityBand,
+  tallyConnectivityFromLastMessages,
+} from "@/lib/fleet/connectivity";
+import {
+  fleetCategoryLabel,
+  tallyFleetByCategory,
 } from "@/lib/fleet/categories";
+import { KPI_TARGETS, averageSheetMetric } from "@/lib/utils";
 
 export async function getKpiSummary(from: Date, to: Date): Promise<KpiSummary> {
   const metrics = await db
@@ -40,7 +42,10 @@ export async function getKpiSummary(from: Date, to: Date): Promise<KpiSummary> {
     );
 
   const fleetUnits = await db.select().from(units);
-  const updating = fleetUnits.filter((u) => u.isOnline).length;
+  const connectivityBands = tallyConnectivityFromLastMessages(
+    fleetUnits.map((u) => u.lastMessageAt)
+  );
+  const updating = connectivityBands.updating;
 
   const theftStats = await db
     .select({
@@ -109,6 +114,7 @@ export async function getKpiSummary(from: Date, to: Date): Promise<KpiSummary> {
     updatingUnits: updating,
     nonUpdatingUnits: fleetUnits.length - updating,
     totalUnits: fleetUnits.length,
+    connectivityBands,
     directThefts: {
       count: Number(direct?.count ?? 0),
       volumeLiters: Number(direct?.volume ?? 0),
@@ -256,15 +262,10 @@ export async function getFuelThefts(
       directCount: 0,
       returnPipeCount: 0,
     };
-    const category = resolveFleetCategory(
-      unit.vehicleType,
-      unit.vehicleCategory
-    );
-
     return {
       unitId: unit.id,
       reg: unit.plateNumber ?? unit.name.split("—")[0]?.trim() ?? unit.name,
-      category: categoryLabel(category),
+      category: fleetCategoryLabel(unit.vehicleCategory, unit.vehicleType),
       distanceKm: metrics.distanceKm,
       fuelConsumedLiters: metrics.fuelConsumedLiters,
       directTheftLiters: thefts.direct,
@@ -279,12 +280,12 @@ export async function getFuelThefts(
   });
 
   const categoryTheft = new Map<
-    FleetCategory,
+    string,
     { direct: number; returnPipe: number }
   >();
 
   for (const unit of allUnits) {
-    const cat = resolveFleetCategory(unit.vehicleType, unit.vehicleCategory);
+    const cat = fleetCategoryLabel(unit.vehicleCategory, unit.vehicleType);
     const thefts = theftUnitMap.get(unit.id);
     if (!thefts) continue;
     const entry = categoryTheft.get(cat) ?? { direct: 0, returnPipe: 0 };
@@ -293,18 +294,15 @@ export async function getFuelThefts(
     categoryTheft.set(cat, entry);
   }
 
-  const theftByCategory = (
-    Object.keys(CATEGORY_LABELS) as FleetCategory[]
-  ).map((key) => {
-    const data = categoryTheft.get(key) ?? { direct: 0, returnPipe: 0 };
-    return {
-      category: CATEGORY_LABELS[key],
-      categoryKey: key,
+  const theftByCategory = [...categoryTheft.entries()]
+    .map(([category, data]) => ({
+      category,
+      categoryKey: category === "—" ? "Uncategorized" : category,
       directLiters: data.direct,
       returnPipeLiters: data.returnPipe,
       totalLiters: data.direct + data.returnPipe,
-    };
-  });
+    }))
+    .sort((a, b) => b.totalLiters - a.totalLiters);
 
   const totalDistance = fleetTable.reduce((s, r) => s + r.distanceKm, 0);
   const totalFuel = fleetTable.reduce((s, r) => s + r.fuelConsumedLiters, 0);

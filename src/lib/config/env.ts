@@ -48,6 +48,9 @@ export const googleSheetsConfig = {
       fleet: readRequired("GOOGLE_SHEETS_FLEET_RANGE"),
     };
   },
+  /** Tab with Grouping + Category columns (Kasulu Machines and LMVs). */
+  registerRange:
+    process.env.GOOGLE_SHEETS_REGISTER_RANGE?.trim() ?? "Sheet3!A:B",
   syncDays: Number(process.env.GOOGLE_SHEETS_SYNC_DAYS ?? "7"),
 };
 
@@ -59,25 +62,47 @@ export const wialonConfig = {
   reportGroupId: process.env.WIALON_REPORT_GROUP_ID ?? "",
   reportTableLabel: process.env.WIALON_REPORT_TABLE_LABEL ?? "",
   reportMaxDays: Number(process.env.WIALON_REPORT_MAX_DAYS ?? "7"),
+  /** Current Mobile Status — ControlRoom (live asset table on dashboard) */
+  mobileStatusResourceId: process.env.WIALON_MOBILE_STATUS_RESOURCE_ID ?? "",
+  mobileStatusTemplateId: process.env.WIALON_MOBILE_STATUS_TEMPLATE_ID ?? "",
+  mobileStatusObjectId:
+    process.env.WIALON_MOBILE_STATUS_OBJECT_ID ??
+    process.env.WIALON_MOBILE_STATUS_GROUP_ID ??
+    "",
+  mobileStatusTableLabel: process.env.WIALON_MOBILE_STATUS_TABLE_LABEL ?? "",
 };
 
-export function isTelematicsConfigured(): boolean {
+export function hasWialonToken(): boolean {
   const token = wialonConfig.token;
-  const hasToken = !!token && token !== "your_wialon_token_here";
+  return !!token && token !== "your_wialon_token_here";
+}
+
+export function isMobileStatusConfigured(): boolean {
   return (
-    hasToken &&
+    hasWialonToken() &&
+    !!wialonConfig.mobileStatusResourceId &&
+    !!wialonConfig.mobileStatusTemplateId &&
+    !!(wialonConfig.mobileStatusObjectId || wialonConfig.reportGroupId)
+  );
+}
+
+export function isTelematicsConfigured(): boolean {
+  return (
+    hasWialonToken() &&
     !!wialonConfig.reportResourceId &&
     !!wialonConfig.reportTemplateId &&
     !!wialonConfig.reportGroupId
   );
 }
 
+export function isUnitLocationsConfigured(): boolean {
+  return isMobileStatusConfigured() || isTelematicsConfigured();
+}
+
 export function isWialonConfigured(): boolean {
-  const token = wialonConfig.token;
-  const hasToken = !!token && token !== "your_wialon_token_here";
   return (
     (appConfig.dataSource === "wialon" || appConfig.dataSource === "both") &&
-    hasToken
+    hasWialonToken()
   );
 }
 
