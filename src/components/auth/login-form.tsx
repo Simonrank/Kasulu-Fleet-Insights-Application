@@ -67,8 +67,8 @@ export function LoginForm() {
   }
 
   return (
-    <div className="login-page">
-      <section className="login-hero" aria-hidden={false}>
+    <div className="login-page clay-login">
+      <section className="login-hero clay-login__hero" aria-hidden={false}>
         <div className="login-hero__media-wrap">
           <Image
             src={brand.heroSrc}
@@ -98,9 +98,9 @@ export function LoginForm() {
         </div>
       </section>
 
-      <section className="login-panel">
+      <section className="login-panel clay-login__panel">
         <div className="login-panel__inner">
-          <div className="login-panel__brand-card">
+          <div className="login-panel__brand-card clay-card clay-card--raised">
             <Image
               src={brand.logoSrc}
               alt={`${brand.name} logo`}
@@ -111,8 +111,8 @@ export function LoginForm() {
             />
           </div>
 
-          <div className="login-card">
-            <div className="login-card__badge">
+          <div className="login-card clay-card clay-card--panel">
+            <div className="login-card__badge clay-badge">
               <Lock className="h-3.5 w-3.5" aria-hidden />
               Secure sign-in
             </div>
@@ -135,7 +135,7 @@ export function LoginForm() {
                   disabled={loading || warmingUp}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="login-form__input"
+                  className="login-form__input clay-input"
                   placeholder="you@company.com"
                 />
               </div>
@@ -153,7 +153,7 @@ export function LoginForm() {
                     disabled={loading || warmingUp}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="login-form__input login-form__input--password"
+                    className="login-form__input login-form__input--password clay-input"
                     placeholder="••••••••"
                   />
                   <button
@@ -172,14 +172,14 @@ export function LoginForm() {
               </div>
 
               {error && (
-                <p className="login-form__error" role="alert">
+                <p className="login-form__error clay-error" role="alert">
                   {error}
                 </p>
               )}
 
               <button
                 type="submit"
-                className="login-form__submit"
+                className="login-form__submit clay-btn"
                 disabled={loading || warmingUp}
               >
                 {loading
