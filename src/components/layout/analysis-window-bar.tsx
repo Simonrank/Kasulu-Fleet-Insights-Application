@@ -1,13 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Calendar, Play, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SheetReportingDateRange } from "@/lib/google-sheets/date-range";
 import {
   darDayKey,
-  formatReportingPeriodLabel,
-  isSameReportingDay,
   presetReportingRange,
   reportingDayEndIso,
 } from "@/lib/google-sheets/reporting-date-range";
@@ -107,27 +105,6 @@ export function AnalysisWindowBar({
   const minDate = sheetDateRange?.minDate;
   const maxDate = sheetDateRange?.maxDate;
 
-  const appliedLabel = useMemo(
-    () => (from && to ? formatReportingPeriodLabel(from, to) : ""),
-    [from, to]
-  );
-
-  const draftLabel = useMemo(
-    () =>
-      draftFrom && draftTo
-        ? formatReportingPeriodLabel(draftFrom, draftTo)
-        : "",
-    [draftFrom, draftTo]
-  );
-
-  const draftPending =
-    draftFrom !== from ||
-    draftTo !== to ||
-    draftLabel !== appliedLabel;
-
-  const sameDayDraft =
-    draftFrom && draftTo ? isSameReportingDay(draftFrom, draftTo) : false;
-
   return (
     <div className="analysis-window shrink-0 border-b border-slate-200/80 bg-white px-4 py-3 md:px-6">
       <div className="grid gap-3 lg:grid-cols-[auto_1fr_auto] lg:items-end">
@@ -224,28 +201,6 @@ export function AnalysisWindowBar({
             />
           </button>
         </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-        {appliedLabel && (
-          <span>
-            Active period:{" "}
-            <span className="font-medium text-slate-700">{appliedLabel}</span>
-            {isSameReportingDay(from, to) ? " (single day)" : " (summed by day)"}
-          </span>
-        )}
-        {draftPending && (
-          <span className="text-amber-700">
-            Unapplied changes — click Run analysis
-            {draftLabel ? ` (${draftLabel})` : ""}
-          </span>
-        )}
-        {!sameDayDraft && draftFrom && draftTo && (
-          <span>
-            Range mode: theft and fuel totals are summed across each day in the
-            period.
-          </span>
-        )}
       </div>
     </div>
   );

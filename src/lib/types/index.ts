@@ -7,7 +7,7 @@ export type DateRange = {
   to: Date;
 };
 
-export type FleetDataSource = "google_sheets" | "wialon";
+export type FleetDataSource = "google_sheets" | "wialon" | "postgres";
 
 export type UnitLatestRow = {
   unitId: string;
@@ -55,7 +55,7 @@ export type DashboardBundle = {
   speedViolations: SpeedViolationsSummary;
   fetchedAt: string;
   /** Which upstream source produced this bundle */
-  dataSource?: "google_sheets" | "wialon";
+  dataSource?: FleetDataSource;
   /** Sheet min/max/default range — avoids a separate date-range round trip. */
   sheetDateRange?: {
     minDate: string;

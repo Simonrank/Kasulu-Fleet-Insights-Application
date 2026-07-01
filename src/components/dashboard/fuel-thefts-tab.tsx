@@ -81,12 +81,6 @@ export function FuelTheftsTab({ from, to }: Props) {
       <div className="dashboard-workspace__glow pointer-events-none" aria-hidden />
 
       <div className="relative space-y-4 p-6 md:p-8">
-        {isFetching && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Updating period…
-          </p>
-        )}
-
         {hasActiveFilters && (
           <p className="rounded-lg border border-[#99f6e4]/40 bg-[#f0fdfa]/60 px-3 py-2 text-sm text-[#0f766e]">
             Showing {filteredTable.length} of {data.fleetTable.length} units

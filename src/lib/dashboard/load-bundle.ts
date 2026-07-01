@@ -1,33 +1,57 @@
 import type { DashboardBundle } from "@/lib/types";
-import { isGoogleSheetsConfigured } from "@/lib/config/env";
-import { buildSheetReportingDateRange } from "@/lib/google-sheets/date-range";
-import { getDashboardBundle } from "@/lib/google-sheets/dashboard-cache";
-import { getFleetDataset } from "@/lib/google-sheets/fleet-dataset";
-import { getUtilizationBundle } from "@/lib/google-sheets/utilization-cache";
+import { getDbReportingDateRange, hasSyncedMetrics } from "@/lib/db/reporting-date-range";
 import { emptySpeedViolationsSummary } from "@/lib/fleet/speed-violations-analytics";
+import {
+  markSheetsSynced,
+  triggerGoogleSheetsSyncIfStale,
+} from "@/lib/google-sheets/ensure-sync";
+import { syncFromGoogleSheets } from "@/lib/google-sheets/sync";
+import {
+  getFuelThefts,
+  getKpiSummary,
+  getUtilization,
+} from "@/lib/services/analytics";
+import { getFleetSummary } from "@/lib/services/fleet";
 
-/** Dashboard KPIs, thefts, fleet, and utilization — sheet data only (fast path). */
+type LoadOptions = {
+  /** Pull latest sheet rows into Postgres before reading. */
+  forceSync?: boolean;
+};
+
+/** Dashboard KPIs, thefts, fleet, and utilization — Postgres fast path (synced from sheets). */
 export async function loadDashboardBundle(
   from: Date,
-  to: Date
+  to: Date,
+  options: LoadOptions = {}
 ): Promise<DashboardBundle> {
-  if (!isGoogleSheetsConfigured()) {
-    throw new Error(
-      "Google Sheets is not configured. Set GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_SHEETS_FLEET_RANGE."
-    );
+  if (options.forceSync) {
+    await syncFromGoogleSheets();
+    markSheetsSynced();
+  } else {
+    triggerGoogleSheetsSyncIfStale();
+    if (!(await hasSyncedMetrics())) {
+      await syncFromGoogleSheets();
+      markSheetsSynced();
+    }
   }
 
-  const dataset = await getFleetDataset();
-  const bundle = getDashboardBundle(dataset, from, to);
-  const utilization = getUtilizationBundle(dataset, from, to);
-  const sheetDateRange = buildSheetReportingDateRange(dataset.rows);
+  const [kpis, thefts, fleet, utilization, sheetDateRange] = await Promise.all([
+    getKpiSummary(from, to),
+    getFuelThefts(from, to, "all"),
+    getFleetSummary(),
+    getUtilization(from, to),
+    getDbReportingDateRange(),
+  ]);
 
   return {
-    ...bundle,
+    kpis,
+    thefts,
+    fleet,
     utilization,
     speedViolations: emptySpeedViolationsSummary(),
     unitLatest: [],
-    dataSource: "google_sheets",
+    dataSource: "postgres",
     sheetDateRange: sheetDateRange ?? undefined,
+    fetchedAt: new Date().toISOString(),
   };
 }

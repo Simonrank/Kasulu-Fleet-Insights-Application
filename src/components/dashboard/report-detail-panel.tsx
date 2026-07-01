@@ -103,12 +103,6 @@ export function ReportDetailPanel({
           {categoryFilterActive ? ` · ${categoryFilter}` : ""}
         </p>
 
-        {utilizationQuery.isFetching && utilizationQuery.data && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Updating period…
-          </p>
-        )}
-
         {categoryFilterActive && utilizationQuery.data && (
           <p className="rounded-lg border border-[#99f6e4]/40 bg-[#f0fdfa]/60 px-3 py-2 text-sm text-[#0f766e]">
             Showing {filteredUtilizationRows.length} of{" "}
@@ -140,12 +134,6 @@ export function ReportDetailPanel({
           Period: {periodLabel}
           {categoryFilterActive ? ` · ${categoryFilter}` : ""}
         </p>
-
-        {fuelQuery.isFetching && fuelQuery.data && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Updating period…
-          </p>
-        )}
 
         {categoryFilterActive && fuelQuery.data && (
           <p className="rounded-lg border border-[#99f6e4]/40 bg-[#f0fdfa]/60 px-3 py-2 text-sm text-[#0f766e]">
@@ -183,12 +171,6 @@ export function ReportDetailPanel({
         </div>
 
         <p className="text-sm text-muted-foreground">Period: {periodLabel}</p>
-
-        {incidentsQuery.isFetching && incidentsQuery.data && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Updating period…
-          </p>
-        )}
 
         <ViolationsReportContent from={from} to={to} />
       </div>

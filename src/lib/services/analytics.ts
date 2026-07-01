@@ -481,19 +481,32 @@ export async function getUtilization(
   from: Date,
   to: Date
 ): Promise<UtilizationSummary> {
-  const { isGoogleSheetsConfigured } = await import("@/lib/config/env");
-  if (isGoogleSheetsConfigured()) {
-    const { getSheetUtilization } = await import(
-      "@/lib/google-sheets/utilization"
-    );
-    return getSheetUtilization(from, to);
-  }
+  const theftCounts = await db
+    .select({
+      unitId: fuelEvents.unitId,
+      count: count(),
+    })
+    .from(fuelEvents)
+    .where(
+      and(
+        eq(fuelEvents.eventType, "theft"),
+        gte(fuelEvents.occurredAt, from),
+        lte(fuelEvents.occurredAt, to)
+      )
+    )
+    .groupBy(fuelEvents.unitId);
+
+  const theftByUnit = new Map(
+    theftCounts.map((row) => [row.unitId, Number(row.count ?? 0)])
+  );
 
   const rows = await db
     .select({
       unitId: units.id,
       unitName: units.name,
       driverName: units.driverName,
+      vehicleType: units.vehicleType,
+      vehicleCategory: units.vehicleCategory,
       distanceKm: sum(dailyUnitMetrics.distanceKm),
       engineHours: sum(dailyUnitMetrics.engineHours),
       productiveHours: sum(dailyUnitMetrics.productiveHours),
@@ -508,7 +521,13 @@ export async function getUtilization(
         lte(dailyUnitMetrics.date, to)
       )
     )
-    .groupBy(units.id, units.name, units.driverName)
+    .groupBy(
+      units.id,
+      units.name,
+      units.driverName,
+      units.vehicleType,
+      units.vehicleCategory
+    )
     .orderBy(units.name);
 
   const byUnit = rows
@@ -521,12 +540,13 @@ export async function getUtilization(
         unitId: r.unitId,
         unitName: r.unitName,
         driverName: r.driverName,
+        category: fleetCategoryLabel(r.vehicleCategory, r.vehicleType),
         distanceKm,
         engineHours,
         productiveHours: productive,
         idleHours: idle,
         fuelConsumedLiters: Number(r.fuelConsumedLiters ?? 0),
-        violationCount: 0,
+        violationCount: theftByUnit.get(r.unitId) ?? 0,
         kmPerEngineHour: engineHours > 0 ? distanceKm / engineHours : 0,
         utilizationPercent:
           engineHours > 0 ? (productive / engineHours) * 100 : 0,

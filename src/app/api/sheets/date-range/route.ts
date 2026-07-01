@@ -1,38 +1,46 @@
 import { NextResponse } from "next/server";
+import { getDbReportingDateRange, hasSyncedMetrics } from "@/lib/db/reporting-date-range";
+import {
+  markSheetsSynced,
+  triggerGoogleSheetsSyncIfStale,
+} from "@/lib/google-sheets/ensure-sync";
+import { syncFromGoogleSheets } from "@/lib/google-sheets/sync";
 import { isGoogleSheetsConfigured } from "@/lib/config/env";
-import { hasGoogleSheetsCredentials } from "@/lib/google-sheets/client";
-import { buildSheetReportingDateRange } from "@/lib/google-sheets/date-range";
-import { getFleetDataset } from "@/lib/google-sheets/fleet-dataset";
 
 export const maxDuration = 60;
 
 export async function GET() {
   try {
-    if (!isGoogleSheetsConfigured() || !hasGoogleSheetsCredentials()) {
-      return NextResponse.json(
-        { error: "Google Sheets is not configured" },
-        { status: 503 }
-      );
+    triggerGoogleSheetsSyncIfStale();
+
+    let range = await getDbReportingDateRange();
+
+    if (!range && isGoogleSheetsConfigured()) {
+      await syncFromGoogleSheets();
+      markSheetsSynced();
+      range = await getDbReportingDateRange();
     }
 
-    const dataset = await getFleetDataset();
-    const range = buildSheetReportingDateRange(dataset.rows);
-
     if (!range) {
+      const hasData = await hasSyncedMetrics();
       return NextResponse.json(
-        { error: "No dated rows found in the fleet sheet" },
+        {
+          error: hasData
+            ? "No dated metrics found in database"
+            : "No synced sheet data yet. Run sync or wait for the scheduled job.",
+        },
         { status: 404 }
       );
     }
 
     return NextResponse.json(range, {
       headers: {
-        "Cache-Control": "private, max-age=300, stale-while-revalidate=600",
+        "Cache-Control": "private, max-age=120, stale-while-revalidate=300",
       },
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to read sheet date range";
+      error instanceof Error ? error.message : "Failed to read date range";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

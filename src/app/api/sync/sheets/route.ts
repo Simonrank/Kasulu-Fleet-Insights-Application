@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { markSheetsSynced } from "@/lib/google-sheets/ensure-sync";
 import { syncFromGoogleSheets } from "@/lib/google-sheets/sync";
 
 export async function POST(request: Request) {
@@ -10,6 +11,10 @@ export async function POST(request: Request) {
   }
 
   const result = await syncFromGoogleSheets();
+  if (result.success) {
+    markSheetsSynced();
+  }
+
   return NextResponse.json(result, {
     status: result.success ? 200 : 502,
   });

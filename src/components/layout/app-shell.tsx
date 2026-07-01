@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { cn, defaultViolationsFromIso } from "@/lib/utils";
 import { presetReportingRange, normalizeReportingRange } from "@/lib/google-sheets/reporting-date-range";
 import { fetchDashboard } from "@/lib/api/fleet-fetch";
+import { AppBrandBar } from "@/components/brand/app-brand-bar";
 import { FleetDashboard } from "@/components/dashboard/fleet-dashboard";
 import { AnalysisWindowBar } from "@/components/layout/analysis-window-bar";
 import { CategoryFilterBar } from "@/components/layout/category-filter-bar";
@@ -301,7 +302,14 @@ export function AppShell() {
       <UtilizationViewFilterProvider>
       <div
         className={cn(
-          "app-layout min-h-screen",
+          "app-frame",
+          sidebarExpanded && "app-frame--sidebar-expanded"
+        )}
+      >
+      <AppBrandBar />
+      <div
+        className={cn(
+          "app-layout",
           sidebarExpanded && "app-layout--sidebar-expanded"
         )}
       >
@@ -388,6 +396,7 @@ export function AppShell() {
             </TabPane>
           )}
         </main>
+      </div>
       </div>
       </div>
       </UtilizationViewFilterProvider>

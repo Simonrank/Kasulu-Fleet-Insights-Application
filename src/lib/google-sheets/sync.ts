@@ -1,14 +1,21 @@
 import { startOfDay, subDays } from "date-fns";
-import { db } from "@/lib/db";
-import { fuelEvents, units } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { units } from "@/lib/db/schema";
+import { getSyncDb, type SyncDb } from "@/lib/db/sync-client";
+import {
+  upsertDailyMetric,
+  upsertFuelFillEvent,
+  upsertFuelTheftEvent,
+} from "@/lib/db/upserts";
 import { googleSheetsConfig, isGoogleSheetsConfigured } from "@/lib/config/env";
 import { fetchSheetRange } from "@/lib/google-sheets/client";
+import { getCategoryRegister } from "@/lib/fleet/category-register";
+import { normalizeAssetName } from "@/lib/fleet/asset-names";
 import {
+  buildSheetUnitWialonIdMap,
   connectivityFromSheet,
-  internalUnitIdFromSheetKey,
   parseKasuluFleetSheet,
 } from "@/lib/google-sheets/parse";
-import { upsertDailyMetric, upsertFuelTheftEvent } from "@/lib/wialon/sync";
 
 export type SheetsSyncResult = {
   success: boolean;
@@ -33,7 +40,7 @@ function sheetEventId(
   return `sheet-${kind}-${machineId}-${startOfDay(date).toISOString()}`;
 }
 
-async function syncKasuluFleetSheet(): Promise<{
+async function syncKasuluFleetSheet(db: SyncDb): Promise<{
   unitsSynced: number;
   fuelEventsSynced: number;
   metricsSynced: number;
@@ -58,6 +65,14 @@ async function syncKasuluFleetSheet(): Promise<{
   const inRange = parsedRows.filter((row) => startOfDay(row.date) >= cutoff);
   const rowsSkipped = parsedRows.length - inRange.length;
 
+  const allMachineNames = [
+    ...new Set([
+      ...parsedRows.map((row) => row.machineId),
+      ...latestByMachine.keys(),
+    ]),
+  ];
+  const wialonIdByName = buildSheetUnitWialonIdMap(allMachineNames);
+
   const unitNames = new Set<string>();
   let fuelEventsSynced = 0;
   let metricsSynced = 0;
@@ -65,10 +80,15 @@ async function syncKasuluFleetSheet(): Promise<{
   async function upsertFromRow(parsed: (typeof parsedRows)[number]) {
     const isOnline = connectivityFromSheet(parsed.comment, parsed.lastMessageAt);
 
+    const wialonId = wialonIdByName.get(parsed.machineId);
+    if (wialonId == null) {
+      throw new Error(`Missing wialon_id mapping for unit: ${parsed.machineId}`);
+    }
+
     const [unit] = await db
       .insert(units)
       .values({
-        wialonId: internalUnitIdFromSheetKey(parsed.machineId),
+        wialonId,
         name: parsed.machineId,
         lastMessageAt: parsed.lastMessageAt,
         isOnline,
@@ -86,15 +106,19 @@ async function syncKasuluFleetSheet(): Promise<{
       })
       .returning();
 
+    if (!unit) {
+      throw new Error(`Failed to upsert unit: ${parsed.machineId}`);
+    }
+
     unitNames.add(parsed.machineId);
 
-    await upsertDailyMetric({
+    await upsertDailyMetric(db, {
       unitId: unit.id,
       date: startOfDay(parsed.date),
       distanceKm: parsed.distanceKm,
       engineHours: parsed.engineHours,
-      productiveHours: 0,
-      idleHours: 0,
+      productiveHours: parsed.productiveHours ?? 0,
+      idleHours: parsed.idleHours ?? 0,
       fuelConsumedLiters: parsed.fuelConsumedLiters,
       fuelFilledLiters: parsed.fuelFilledLiters,
       kmPerLiter: parsed.kmPerLiter,
@@ -105,7 +129,7 @@ async function syncKasuluFleetSheet(): Promise<{
     metricsSynced++;
 
     if (parsed.fuelTheftLiters > 0) {
-      await upsertFuelTheftEvent({
+      await upsertFuelTheftEvent(db, {
         unitId: unit.id,
         wialonEventId: sheetEventId("theft", parsed.machineId, parsed.date),
         volumeLiters: parsed.fuelTheftLiters,
@@ -117,39 +141,35 @@ async function syncKasuluFleetSheet(): Promise<{
     }
 
     if (parsed.fuelFilledLiters > 0) {
-      await db
-        .insert(fuelEvents)
-        .values({
-          unitId: unit.id,
-          wialonEventId: sheetEventId("fill", parsed.machineId, parsed.date),
-          eventType: "filling",
-          volumeLiters: parsed.fuelFilledLiters,
-          occurredAt: parsed.date,
-          description: parsed.comment || undefined,
-        })
-        .onConflictDoUpdate({
-          target: fuelEvents.wialonEventId,
-          set: {
-            volumeLiters: parsed.fuelFilledLiters,
-            description: parsed.comment || undefined,
-          },
-        });
+      await upsertFuelFillEvent(db, {
+        unitId: unit.id,
+        wialonEventId: sheetEventId("fill", parsed.machineId, parsed.date),
+        volumeLiters: parsed.fuelFilledLiters,
+        occurredAt: parsed.date,
+        description: parsed.comment || undefined,
+      });
       fuelEventsSynced++;
     }
   }
 
-  for (const row of inRange) {
-    await upsertFromRow(row);
+  for (let i = 0; i < inRange.length; i++) {
+    await upsertFromRow(inRange[i]!);
+    if ((i + 1) % 100 === 0) {
+      console.log(`[sync] ${i + 1}/${inRange.length} rows…`);
+    }
   }
 
   for (const latest of latestByMachine.values()) {
     if (startOfDay(latest.date) >= cutoff) continue;
 
     const isOnline = connectivityFromSheet(latest.comment, latest.lastMessageAt);
+    const wialonId = wialonIdByName.get(latest.machineId);
+    if (wialonId == null) continue;
+
     await db
       .insert(units)
       .values({
-        wialonId: internalUnitIdFromSheetKey(latest.machineId),
+        wialonId,
         name: latest.machineId,
         lastMessageAt: latest.lastMessageAt,
         isOnline,
@@ -176,6 +196,29 @@ async function syncKasuluFleetSheet(): Promise<{
   };
 }
 
+async function syncCategoryRegisterToUnits(db: SyncDb): Promise<number> {
+  const register = await getCategoryRegister();
+  if (register.size === 0) return 0;
+
+  let updated = 0;
+  const allUnits = await db.select({ id: units.id, name: units.name }).from(units);
+
+  for (const unit of allUnits) {
+    const category =
+      register.get(normalizeAssetName(unit.name)) ??
+      register.get(unit.name.trim());
+    if (!category) continue;
+
+    await db
+      .update(units)
+      .set({ vehicleCategory: category, updatedAt: new Date() })
+      .where(eq(units.id, unit.id));
+    updated++;
+  }
+
+  return updated;
+}
+
 export async function syncFromGoogleSheets(): Promise<SheetsSyncResult> {
   if (!isGoogleSheetsConfigured()) {
     return {
@@ -189,8 +232,11 @@ export async function syncFromGoogleSheets(): Promise<SheetsSyncResult> {
     };
   }
 
+  const db = getSyncDb();
+
   try {
-    const fleet = await syncKasuluFleetSheet();
+    const fleet = await syncKasuluFleetSheet(db);
+    const categoriesUpdated = await syncCategoryRegisterToUnits(db);
 
     return {
       success: fleet.metricsSynced > 0 || fleet.unitsSynced > 0,
@@ -200,7 +246,7 @@ export async function syncFromGoogleSheets(): Promise<SheetsSyncResult> {
       metricsSynced: fleet.metricsSynced,
       message:
         fleet.metricsSynced > 0
-          ? `Google Sheet sync: ${fleet.unitsSynced} machines, ${fleet.metricsSynced} rows (${fleet.rowsSkipped} older rows skipped), ${fleet.fuelEventsSynced} fuel events`
+          ? `Google Sheet sync: ${fleet.unitsSynced} machines, ${fleet.metricsSynced} rows (${fleet.rowsSkipped} older rows skipped), ${fleet.fuelEventsSynced} fuel events, ${categoriesUpdated} categories`
           : "Google Sheet returned no rows in the configured sync window",
     };
   } catch (error) {

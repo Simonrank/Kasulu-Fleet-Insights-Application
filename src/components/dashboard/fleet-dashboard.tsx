@@ -20,7 +20,6 @@ import {
 } from "@/lib/fleet/category-kpis";
 import { useFleetCategoryFilter } from "@/context/fleet-category-filter";
 import { cn, formatNumber } from "@/lib/utils";
-import { formatReportingPeriodLabel, isSameReportingDay } from "@/lib/google-sheets/reporting-date-range";
 import type { ConnectivityFilter, FleetSummary, KpiSummary } from "@/lib/types";
 import { filterTheftEvents } from "@/lib/fleet/theft-filters";
 import {
@@ -474,13 +473,6 @@ function DashboardContent({ from, to }: Props) {
     return (
       <div className="dashboard-workspace min-h-full">
         <div className="relative space-y-8 p-6 md:p-8">
-          <p
-            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
-            aria-live="polite"
-          >
-            Loading fleet metrics from Google Sheets… live connectivity may appear
-            first.
-          </p>
           <DashboardSkeleton
             liveConnectivity={liveRows.length > 0 ? connectivityPanel : undefined}
           />
@@ -494,25 +486,6 @@ function DashboardContent({ from, to }: Props) {
       <div className="dashboard-workspace__glow pointer-events-none" aria-hidden />
 
       <div className="relative space-y-8 p-6 md:p-8">
-        {(isFetching || isLoading) && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600" aria-live="polite">
-            Updating period… fuel and theft totals reflect the selected analysis window.
-          </p>
-        )}
-
-        <p className="text-sm text-slate-600">
-          Reporting period:{" "}
-          <span className="font-medium text-slate-800">
-            {formatReportingPeriodLabel(from, to)}
-          </span>
-          {" · "}
-          {isSameReportingDay(from, to)
-            ? `${theftEvents} theft event${theftEvents === 1 ? "" : "s"} on this day`
-            : `${theftEvents} theft event${theftEvents === 1 ? "" : "s"} summed across days`}
-          {" · "}
-          {formatNumber(totalTheftLiters, 1)} L total stolen
-        </p>
-
         {selectedUnit && (
           <VehicleDetailPanel
             unit={selectedUnit}

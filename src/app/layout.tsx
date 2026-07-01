@@ -17,7 +17,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Kasulu Fleet Reporting",
   description:
-    "Fleet Operations & Security reporting for Kasulu Agricultural Project",
+    "Fleet operations, compliance, fuel efficiency, and driver safety analytics",
+  icons: {
+    icon: [{ url: "/logo.jpg", type: "image/jpeg" }],
+    shortcut: "/logo.jpg",
+    apple: "/logo.jpg",
+  },
 };
 
 export default async function RootLayout({

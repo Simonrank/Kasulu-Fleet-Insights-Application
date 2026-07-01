@@ -386,6 +386,38 @@ export function internalUnitIdFromSheetKey(name: string): number {
   return Math.abs(hash) || 1;
 }
 
+function hashSheetUnitName(name: string, salt = 0): number {
+  const key = salt === 0 ? name : `${name}\0${salt}`;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (Math.imul(31, hash) + key.charCodeAt(i)) | 0;
+  }
+  // Negative = sheet-only surrogate; real Wialon unit IDs are positive.
+  return -(Math.abs(hash) || 1);
+}
+
+/** Unique wialon_id per machine name — resolves 32-bit hash collisions. */
+export function buildSheetUnitWialonIdMap(machineNames: string[]): Map<string, number> {
+  const idByName = new Map<string, number>();
+  const usedIds = new Set<number>();
+
+  for (const name of machineNames) {
+    let salt = 0;
+    let id = hashSheetUnitName(name, salt);
+    while (usedIds.has(id)) {
+      salt++;
+      id = hashSheetUnitName(name, salt);
+      if (salt > 10_000) {
+        throw new Error(`Could not assign unique wialon_id for unit: ${name}`);
+      }
+    }
+    idByName.set(name, id);
+    usedIds.add(id);
+  }
+
+  return idByName;
+}
+
 /** Connectivity from last message time (≤4h updating, then 4–24h, 24–48h, >48h). */
 export function connectivityFromSheet(
   _comment: string,

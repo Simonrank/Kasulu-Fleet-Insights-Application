@@ -1,29 +1,22 @@
 import { NextResponse } from "next/server";
-import { isGoogleSheetsConfigured } from "@/lib/config/env";
-import { getSheetUtilization } from "@/lib/google-sheets/utilization";
-import { prefetchFleetDataset } from "@/lib/google-sheets/fleet-dataset";
-import { triggerGoogleSheetsSyncIfStale } from "@/lib/google-sheets/ensure-sync";
-import { parseDateRange } from "@/lib/utils";
+import { getUtilization } from "@/lib/services/analytics";
+import { parseReportingDateRange } from "@/lib/google-sheets/reporting-date-range";
+import { loadDashboardBundle } from "@/lib/dashboard/load-bundle";
+
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   try {
-    if (!isGoogleSheetsConfigured()) {
-      return NextResponse.json(
-        { error: "Google Sheets is not configured." },
-        { status: 503 }
-      );
-    }
-
     const { searchParams } = new URL(request.url);
-    const { from, to } = parseDateRange(
+    const { from, to } = parseReportingDateRange(
       searchParams.get("from"),
       searchParams.get("to")
     );
 
-    triggerGoogleSheetsSyncIfStale();
-    prefetchFleetDataset();
+    // Warm Postgres from sheets if needed (same path as dashboard).
+    await loadDashboardBundle(from, to);
 
-    const data = await getSheetUtilization(from, to);
+    const data = await getUtilization(from, to);
     return NextResponse.json(data, {
       headers: {
         "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
